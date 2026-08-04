@@ -825,28 +825,60 @@ function TypeFolio:_customPresetEntryItems(name)
     }
 end
 
+function TypeFolio:_helpSubItems()
+    return {
+        {
+            text = tr("Overview & Rendering"),
+            callback = function()
+                local help_lines = {
+                    tr("HELP_TITLE"),
+                    "",
+                    tr("HELP_RENDERING"),
+                }
+                showInfo(table.concat(help_lines, "\n"))
+            end,
+        },
+        {
+            text = tr("Calibre regex guide"),
+            callback = function()
+                local help_lines = {
+                    tr("HELP_CALIBRE_REGEX_TITLE"),
+                    "",
+                    tr("HELP_DIALOGUE"),
+                    "",
+                    tr("HELP_CALIBRE_DIALOGUE"),
+                    "",
+                    tr("HELP_CALIBRE_TITLE"),
+                    "",
+                    tr("HELP_CALIBRE_HR"),
+                    "",
+                    tr("HELP_CALIBRE_QUOTE"),
+                    "",
+                    tr("HELP_CALIBRE_DROPCAP"),
+                }
+                showInfo(table.concat(help_lines, "\n"))
+            end,
+        },
+        {
+            text = tr("Gestures & Presets"),
+            callback = function()
+                local help_lines = {
+                    tr("HELP_GESTURE"),
+                    "",
+                    tr("HELP_PRESETS"),
+                }
+                showInfo(table.concat(help_lines, "\n"))
+            end,
+        },
+    }
+end
+
 function TypeFolio:menuItems()
     local items = {}
-    -- 头部一行说明入口：点进去直接弹 InfoMessage，介绍每个分区干什么的
+    -- 头部一行说明入口：点进去展开分类子菜单，避免单页弹窗文字过长
     table.insert(items, {
         text = tr("Help / user guide"),
-        keep_menu_open = true,
-        callback = function()
-            local help_lines = {
-                tr("HELP_TITLE"),
-                "",
-                tr("HELP_RENDERING"),
-                "",
-                tr("HELP_DIALOGUE"),
-                "",
-                tr("HELP_DIALOGUE_CALIBRE"),
-                "",
-                tr("HELP_GESTURE"),
-                "",
-                tr("HELP_PRESETS"),
-            }
-            showInfo(table.concat(help_lines, "\n"))
-        end,
+        sub_item_table_func = function() return self:_helpSubItems() end,
         separator = true,
     })
     table.insert(items, {
