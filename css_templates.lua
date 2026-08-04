@@ -102,6 +102,7 @@ end
 -- 高级排版特效库 (修复引用块子元素遮挡导致的底色未生效问题)
 -- 每个特效是 function(params) -> css；params 缺省时由各自的 defaults 兜底。
 CSSTemplates.tweak_defaults = {
+    dialogue_style = { tint = true, tint_level = "light", bold = false, italic = false },
     header_border = { border = "both", line_style = "solid", thickness = 1, centered = true },
     custom_hr_dashed = { line_style = "dashed", thickness = 2, width = 85 },
     blockquote_box = { bar = 5, tint = "light", italic = true },
@@ -111,6 +112,7 @@ CSSTemplates.tweak_defaults = {
 
 -- 参数取值域，菜单与模板共用一份，避免两处各写各的
 CSSTemplates.tweak_options = {
+    tint_level = { "light", "medium", "strong" },
     line_style = { "solid", "dashed", "dotted" },
     border = { "both", "bottom", "top", "none" },
     tint = { "none", "light", "medium" },
@@ -121,6 +123,39 @@ CSSTemplates.tweak_options = {
 local TINT_COLORS = { none = nil, light = "#e0e0e0", medium = "#c8c8c8" }
 
 CSSTemplates.layout_tweaks = {
+    dialogue_style = function(params)
+        local defaults = CSSTemplates.tweak_defaults.dialogue_style
+        local tint = params and params.tint
+        if tint == nil then tint = defaults.tint end
+        local bold = params and params.bold
+        if bold == nil then bold = defaults.bold end
+        local italic = params and params.italic
+        if italic == nil then italic = defaults.italic end
+        local tint_level = (params and params.tint_level) or defaults.tint_level
+
+        local tint_colors = {
+            light  = "rgba(0, 0, 0, 0.08)",
+            medium = "rgba(0, 0, 0, 0.16)",
+            strong = "rgba(0, 0, 0, 0.25)",
+        }
+
+        local weight = bold and "bold" or "normal"
+        local style  = italic and "italic" or "normal"
+        local bg     = tint and tint_colors[tint_level] or "transparent"
+
+        -- 覆盖常见命名: 对话/发言/台词 类 class
+        return string.format([[
+        /* 对话文本样式 (Calibre 转换时挂上的 .dialogue 等) */
+        span.dialogue, .dialogue, span.dialog, .dialog, span.speech, span.quote-text, span.dlg {
+            font-weight: %s !important;
+            font-style: %s !important;
+            background-color: %s !important;
+            padding: 0 2px !important;
+            border-radius: 2px;
+        }
+    ]], weight, style, bg)
+    end,
+
     blockquote_box = function(params)
         local defaults = CSSTemplates.tweak_defaults.blockquote_box
         local bar = (params and params.bar) or defaults.bar

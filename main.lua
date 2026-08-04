@@ -14,6 +14,7 @@ local CenterContainer = require("ui/widget/container/centercontainer")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
+local InfoMessage = require("ui/widget/infomessage")
 local InputDialog = require("ui/widget/inputdialog")
 local Notification = require("ui/widget/notification")
 local SpinWidget = require("ui/widget/spinwidget")
@@ -25,6 +26,8 @@ local io = require("io")
 
 local CONFIG_KEY = "typefolio_config"
 local TWEAK_ID = "99_typefolio.css"
+-- 用户自定义预设：{ [name] = config snapshot }，存全局（与书本无关）
+local CUSTOM_PRESETS_KEY = "typefolio_custom_presets"
 
 -- 渲染方式是全局设置：CSS 文件本就全局共享（见 README 已知限制），
 -- 若做成每本书，"这个文件归谁管"会更难说清。
@@ -63,6 +66,48 @@ local function getConfig(ui)
     config.tweaks = config.tweaks or {}
     config.tweak_params = config.tweak_params or {}
     return config
+end
+
+-- 预设是"整份配置"的快照：保存时拷贝快照，应用时用快照替换现场。
+-- 名字即键，重命名=搬键；冲突直接在保存/重命名入口拦截。
+local function getCustomPresets()
+    local t = G_reader_settings:readSetting(CUSTOM_PRESETS_KEY)
+    return type(t) == "table" and t or {}
+end
+
+local function snapshotConfig(config)
+    -- 深拷贝一层半就够：tweaks / tweak_params 是嵌套表，得单独复制
+    local snap = {}
+    for k, v in pairs(config) do
+        if type(v) == "table" then
+            snap[k] = {}
+            for k2, v2 in pairs(v) do snap[k][k2] = v2 end
+        else
+            snap[k] = v
+        end
+    end
+    return snap
+end
+
+local function saveCustomPreset(name, config)
+    local presets = getCustomPresets()
+    presets[name] = snapshotConfig(config)
+    G_reader_settings:saveSetting(CUSTOM_PRESETS_KEY, presets)
+end
+
+local function deleteCustomPreset(name)
+    local presets = getCustomPresets()
+    presets[name] = nil
+    G_reader_settings:saveSetting(CUSTOM_PRESETS_KEY, presets)
+end
+
+local function renameCustomPreset(old_name, new_name)
+    local presets = getCustomPresets()
+    if not presets[old_name] or new_name == "" or presets[new_name] then return false end
+    presets[new_name] = presets[old_name]
+    presets[old_name] = nil
+    G_reader_settings:saveSetting(CUSTOM_PRESETS_KEY, presets)
+    return true
 end
 
 local function buildUnderlineCss(config)
@@ -143,6 +188,10 @@ end
 
 local function notify(text)
     UIManager:show(Notification:new{ text = text })
+end
+
+local function showInfo(text)
+    UIManager:show(InfoMessage:new{ text = text })
 end
 
 local TypeFolio = WidgetContainer:extend{
@@ -477,10 +526,14 @@ local TINT_LABELS = {
 }
 
 -- 特效本身的开关，放在子菜单第一行。墨水屏上外层那个小勾选框不好点，
--- 进来之后有一个整行可点的开关更稳。
-function TypeFolio:_tweakEnableItem(tweak_key)
+-- 进来之后有一个整行可点的开关更稳；标题直接写出当前状态，扫一眼即知。
+function TypeFolio:_tweakEnableItem(tweak_key, title)
     return {
-        text = tr("Enable this effect"),
+        text_func = function()
+            local on = getConfig(self.ui).tweaks[tweak_key] == true
+            return T(tr("%1: %2"), tr(title),
+                on and tr("Enabled") or tr("Disabled"))
+        end,
         keep_menu_open = true,
         checked_func = function() return getConfig(self.ui).tweaks[tweak_key] == true end,
         callback = function(touchmenu_instance)
@@ -500,7 +553,7 @@ function TypeFolio:_tweakSubItems(key)
 
     if key == "header_border" then
         return {
-            self:_tweakEnableItem(key),
+            self:_tweakEnableItem(key, "Chapter heading decoration"),
             { text = tr("Border position"),
               enabled_func = function() return getConfig(self.ui).tweaks[key] == true end,
               sub_item_table = self:_paramRadio(key, "border", O.border,
@@ -520,7 +573,7 @@ function TypeFolio:_tweakSubItems(key)
         }
     elseif key == "custom_hr_dashed" then
         return {
-            self:_tweakEnableItem(key),
+            self:_tweakEnableItem(key, "Chapter break rules"),
             { text = tr("Line style"),
               enabled_func = function() return getConfig(self.ui).tweaks[key] == true end,
               sub_item_table = lineStyle() },
@@ -534,7 +587,7 @@ function TypeFolio:_tweakSubItems(key)
         }
     elseif key == "blockquote_box" then
         return {
-            self:_tweakEnableItem(key),
+            self:_tweakEnableItem(key, "Blockquote decoration"),
             { text = tr("Left bar thickness"),
               enabled_func = function() return getConfig(self.ui).tweaks[key] == true end,
               sub_item_table = self:_paramRadio(key, "bar", O.bar,
@@ -545,9 +598,28 @@ function TypeFolio:_tweakSubItems(key)
                   function(v) return tr(TINT_LABELS[v]) end) },
             self:_paramToggle(key, "italic", "Italic text"),
         }
+    elseif key == "dialogue_style" then
+        local TINT_LEVEL_LABELS = {
+            light  = "Light",
+            medium = "Medium",
+            strong = "Strong",
+        }
+        return {
+            self:_tweakEnableItem(key, "Dialogue highlight"),
+            self:_paramToggle(key, "tint", "Background tint"),
+            { text = tr("Tint intensity"),
+              enabled_func = function()
+                  return getConfig(self.ui).tweaks[key] == true
+                      and self:_getParam(key, "tint") == true
+              end,
+              sub_item_table = self:_paramRadio(key, "tint_level", O.tint_level,
+                  function(v) return tr(TINT_LEVEL_LABELS[v]) end) },
+            self:_paramToggle(key, "bold", "Bold"),
+            self:_paramToggle(key, "italic", "Italic"),
+        }
     elseif key == "drop_caps" then
         return {
-            self:_tweakEnableItem(key),
+            self:_tweakEnableItem(key, "Newspaper drop caps"),
             self:_paramSpin(key, "scale",
                 { label = "Size: %1", title = "Drop cap size",
                   min = 1.5, max = 3.5, step = 0.1, hold_step = 0.5,
@@ -561,6 +633,7 @@ end
 function TypeFolio:_tweakItems()
     local ui = self.ui
     local options = {
+        { key = "dialogue_style", text = "Dialogue highlight" },
         { key = "custom_hr_dashed", text = "Chapter break rules" },
         { key = "blockquote_box", text = "Blockquote decoration" },
         { key = "header_border", text = "Chapter heading decoration" },
@@ -638,11 +711,144 @@ function TypeFolio:_presetItems()
             notify(tr("All typesetting tweaks reset"))
         end,
     })
+    -- 用户自定义预设子菜单：把"现在的样子"存为 named snapshot，
+    -- 之后任何书点名字即可整体套用
+    table.insert(items, {
+        text = tr("Custom presets"),
+        sub_item_table_func = function() return self:_customPresetItems() end,
+    })
     return items
+end
+
+function TypeFolio:_customPresetItems()
+    local presets = getCustomPresets()
+    local names = {}
+    for name in pairs(presets) do table.insert(names, name) end
+    table.sort(names)
+    local items = {}
+    table.insert(items, {
+        text = tr("＋ Save current as new preset"),
+        keep_menu_open = false,
+        callback = function()
+            local dialog
+            dialog = InputDialog:new{
+                title = tr("Preset name"),
+                input = T(tr("My preset %1"), tostring(#names + 1)),
+                input_hint = tr("e.g. Night serif body"),
+                buttons = {{{
+                    text = tr("Cancel"),
+                    callback = function() UIManager:close(dialog) end,
+                }, {
+                    text = tr("Save"),
+                    is_enter_default = true,
+                    callback = function()
+                        local name = dialog:getInputText()
+                        if not name or name == "" then return end
+                        if presets[name] then
+                            notify(tr("Name already in use"))
+                            return
+                        end
+                        saveCustomPreset(name, getConfig(self.ui))
+                        UIManager:close(dialog)
+                        notify(T(tr("Saved preset: %1"), name))
+                    end,
+                }}},
+            }
+            UIManager:show(dialog)
+            dialog:onShowKeyboard()
+        end,
+    })
+    if #names == 0 then
+        table.insert(items, { text = tr("(No custom presets yet)"), enabled = false })
+        return items
+    end
+    for _, name in ipairs(names) do
+        table.insert(items, {
+            text = name,
+            sub_item_table_func = function() return self:_customPresetEntryItems(name) end,
+        })
+    end
+    return items
+end
+
+function TypeFolio:_customPresetEntryItems(name)
+    return {
+        {
+            text = tr("Apply this preset"),
+            callback = function()
+                local preset = getCustomPresets()[name]
+                if preset then
+                    applyStyle(self, snapshotConfig(preset))
+                    notify(T(tr("Applied preset: %1"), name))
+                end
+            end,
+        },
+        {
+            text = tr("Rename…"),
+            callback = function()
+                local dialog
+                dialog = InputDialog:new{
+                    title = tr("Rename preset"),
+                    input = name,
+                    buttons = {{{
+                        text = tr("Cancel"),
+                        callback = function() UIManager:close(dialog) end,
+                    }, {
+                        text = tr("Save"),
+                        is_enter_default = true,
+                        callback = function()
+                            local new_name = dialog:getInputText()
+                            if not new_name or new_name == "" or new_name == name then
+                                UIManager:close(dialog)
+                                return
+                            end
+                            if renameCustomPreset(name, new_name) then
+                                UIManager:close(dialog)
+                                notify(T(tr("Renamed to: %1"), new_name))
+                            else
+                                notify(tr("Name already in use"))
+                            end
+                        end,
+                    }}},
+                }
+                UIManager:show(dialog)
+                dialog:onShowKeyboard()
+            end,
+        },
+        {
+            text = T(tr("Delete \"%1\""), name),
+            callback = function()
+                deleteCustomPreset(name)
+                notify(T(tr("Deleted preset: %1"), name))
+            end,
+        },
+    }
 end
 
 function TypeFolio:menuItems()
     local items = {}
+    -- 头部一行说明入口：点进去直接弹 InfoMessage，介绍每个分区干什么的
+    table.insert(items, {
+        text = tr("Help / user guide"),
+        keep_menu_open = true,
+        callback = function()
+            local help_lines = {
+                tr("HELP_TITLE"),
+                "",
+                tr("HELP_RENDERING"),
+                "",
+                tr("HELP_DIALOGUE"),
+                "",
+                tr("HELP_DIALOGUE_CALIBRE"),
+                "",
+                tr("HELP_GESTURE"),
+                "",
+                tr("HELP_PRESETS"),
+            }
+            showInfo(table.concat(help_lines, "\n"))
+        end,
+        separator = true,
+    })
     table.insert(items, {
         text = tr("Underline rendering"),
         sub_item_table = self:_renderModeItems(),
