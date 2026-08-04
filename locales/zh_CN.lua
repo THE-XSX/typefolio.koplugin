@@ -97,7 +97,7 @@ return {
         ["HELP_DIALOGUE"] = "对话高亮：给已用 class（如 .dialogue）标好的对话加粗/斜体/底色，三个效果可独立勾选，底色深浅可调。",
         ["HELP_CALIBRE_REGEX_TITLE"] = "--- Calibre 常用正则查找替换汇总 ---",
         ["HELP_CALIBRE_DIALOGUE"] = "1. 对话高亮 (.dialogue):\n查找：“([^””]*)”\n替换：<span class=\"dialogue\">“\\1”</span>",
-        ["HELP_CALIBRE_TITLE"] = "2. 标题装饰 (<h2>):\n查找：<p[^>]*>\\s*(第[0-9一二三四五六七八九十百千]+[章卷集部][^\\n<]*)</p>\n替换：<h2 class=\"chapter-title\">\\1</h2>",
+        ["HELP_CALIBRE_TITLE"] = "2. 标题装饰 (<h2>):\n查找：<p[^>]*>\\s*(?:<[^>]+>\\s*)*(第[0-9一二三四五六七八九十百千零0-9\\s]+[章卷集回部][^<]*)\\s*(?:</[^>]+>\\s*)*</p>\n替换：<h2 class=\"chapter-title\">\\1</h2>",
         ["HELP_CALIBRE_HR"] = "3. 章尾线 (<hr>):\n查找：<p[^>]*>\\s*(?:[*＊#＃◆◇▲\\-—]{3,})\\s*</p>\n替换：<hr class=\"break\" />",
         ["HELP_CALIBRE_QUOTE"] = "4. 引用块 (<blockquote>):\n查找：<p[^>]*>【引用】([^\\n<]*)</p>\n替换：<blockquote><p>\\1</p></blockquote>",
         ["HELP_CALIBRE_DROPCAP"] = "5. 首字下沉清理全角空格:\n查找：(<h[1-4][^>]*>[^<]*</h[1-4]>\\s*<p[^>]*>)　+\n替换：\\1",

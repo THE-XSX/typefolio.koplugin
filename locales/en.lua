@@ -98,7 +98,7 @@ return {
         ["HELP_DIALOGUE"] = "Dialogue highlight: style quoted speech tagged with .dialogue class. Tint, bold, and italic are independent checkboxes; tint intensity can be tuned.",
         ["HELP_CALIBRE_REGEX_TITLE"] = "--- Calibre Regex Replacement Guide ---",
         ["HELP_CALIBRE_DIALOGUE"] = "1. Dialogue (.dialogue):\nFind: “([^””]*)”\nReplace: <span class=\"dialogue\">“\\1”</span>",
-        ["HELP_CALIBRE_TITLE"] = "2. Heading (<h2>):\nFind: <p[^>]*>\\s*(第[0-9一二三四五六七八九十百千]+[章卷集部][^\\n<]*)</p>\nReplace: <h2 class=\"chapter-title\">\\1</h2>",
+        ["HELP_CALIBRE_TITLE"] = "2. Heading (<h2>):\nFind: <p[^>]*>\\s*(?:<[^>]+>\\s*)*(第[0-9一二三四五六七八九十百千零0-9\\s]+[章卷集回部][^<]*)\\s*(?:</[^>]+>\\s*)*</p>\nReplace: <h2 class=\"chapter-title\">\\1</h2>",
         ["HELP_CALIBRE_HR"] = "3. Chapter Break (<hr>):\nFind: <p[^>]*>\\s*(?:[*＊#＃◆◇▲\\-—]{3,})\\s*</p>\nReplace: <hr class=\"break\" />",
         ["HELP_CALIBRE_QUOTE"] = "4. Blockquote (<blockquote>):\nFind: <p[^>]*>【引用】([^\\n<]*)</p>\nReplace: <blockquote><p>\\1</p></blockquote>",
         ["HELP_CALIBRE_DROPCAP"] = "5. Clean Full-width Spaces for Drop Caps:\nFind: (<h[1-4][^>]*>[^<]*</h[1-4]>\\s*<p[^>]*>)　+\nReplace: \\1",
