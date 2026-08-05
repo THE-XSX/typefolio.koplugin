@@ -728,8 +728,8 @@ function TypeFolio:_customPresetItems()
     local items = {}
     table.insert(items, {
         text = tr("＋ Save current as new preset"),
-        keep_menu_open = false,
-        callback = function()
+        keep_menu_open = true,
+        callback = function(touchmenu_instance)
             local dialog
             dialog = InputDialog:new{
                 title = tr("Preset name"),
@@ -751,6 +751,9 @@ function TypeFolio:_customPresetItems()
                         saveCustomPreset(name, getConfig(self.ui))
                         UIManager:close(dialog)
                         notify(T(tr("Saved preset: %1"), name))
+                        if touchmenu_instance then
+                            touchmenu_instance:updateItems()
+                        end
                     end,
                 }}},
             }
@@ -765,6 +768,7 @@ function TypeFolio:_customPresetItems()
     for _, name in ipairs(names) do
         table.insert(items, {
             text = name,
+            keep_menu_open = true,
             sub_item_table_func = function() return self:_customPresetEntryItems(name) end,
         })
     end
@@ -775,6 +779,7 @@ function TypeFolio:_customPresetEntryItems(name)
     return {
         {
             text = tr("Apply this preset"),
+            keep_menu_open = true,
             callback = function()
                 local preset = getCustomPresets()[name]
                 if preset then
@@ -785,7 +790,8 @@ function TypeFolio:_customPresetEntryItems(name)
         },
         {
             text = tr("Rename…"),
-            callback = function()
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
                 local dialog
                 dialog = InputDialog:new{
                     title = tr("Rename preset"),
@@ -805,6 +811,12 @@ function TypeFolio:_customPresetEntryItems(name)
                             if renameCustomPreset(name, new_name) then
                                 UIManager:close(dialog)
                                 notify(T(tr("Renamed to: %1"), new_name))
+                                if touchmenu_instance then
+                                    if touchmenu_instance.onSubMenuClose then
+                                        touchmenu_instance:onSubMenuClose()
+                                    end
+                                    touchmenu_instance:updateItems()
+                                end
                             else
                                 notify(tr("Name already in use"))
                             end
@@ -817,9 +829,16 @@ function TypeFolio:_customPresetEntryItems(name)
         },
         {
             text = T(tr("Delete \"%1\""), name),
-            callback = function()
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
                 deleteCustomPreset(name)
                 notify(T(tr("Deleted preset: %1"), name))
+                if touchmenu_instance then
+                    if touchmenu_instance.onSubMenuClose then
+                        touchmenu_instance:onSubMenuClose()
+                    end
+                    touchmenu_instance:updateItems()
+                end
             end,
         },
     }
@@ -829,6 +848,7 @@ function TypeFolio:_helpSubItems()
     return {
         {
             text = tr("Overview & Rendering"),
+            keep_menu_open = true,
             callback = function()
                 local help_lines = {
                     tr("HELP_TITLE"),
@@ -840,6 +860,7 @@ function TypeFolio:_helpSubItems()
         },
         {
             text = tr("Calibre regex guide"),
+            keep_menu_open = true,
             callback = function()
                 local help_lines = {
                     tr("HELP_CALIBRE_REGEX_TITLE"),
@@ -861,6 +882,7 @@ function TypeFolio:_helpSubItems()
         },
         {
             text = tr("Gestures & Presets"),
+            keep_menu_open = true,
             callback = function()
                 local help_lines = {
                     tr("HELP_GESTURE"),
