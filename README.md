@@ -106,6 +106,11 @@ Type Folio adds underline and typesetting tweaks (per-line / paragraph / emphasi
 
 ## 更新记录 / Changelog
 
+### 2026-08-05 (v2.1.1)
+
+- 优化**菜单交互体验** (Keep Menu Open)：所有子菜单弹窗、帮助指南及预设操作完成后保持菜单打开状态，避免频繁重复点击进入。
+- 增强**Calibre 正则兼容性** (Calibre Regex Enhancement)：优化使用指南中的标题查找正则，完美兼容多层 `<font>/<span>/<b>` 标签嵌套、换行及各种章节关键字。
+
 ### 2026-08-04
 
 - 新增**对话高亮** (Dialogue Highlight)：支持独立配置底色背景（浅/中/深 3 档浓度）、加粗与斜体，适配 `.dialogue` 等常见 class，附带 Calibre 正则标注教程。
