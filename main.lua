@@ -38,6 +38,20 @@ local function getRenderMode()
     return mode == "paint" and "paint" or "css"
 end
 
+-- para / em_only need DOM selectors; paint path only has screen line boxes
+local function isCssOnlyUnderline(underline)
+    return underline == "para" or underline == "para_dashed" or underline == "para_dotted"
+        or underline == "em_only"
+end
+
+local function normalizeUnderlineForMode(config, mode)
+    if mode == "paint" and isCssOnlyUnderline(config.underline) then
+        config.underline = "none"
+        return true
+    end
+    return false
+end
+
 -- KOReader 只扫描 DataStorage:getDataDir()/styletweaks/ 这一个用户 CSS 目录
 -- （见 frontend/apps/reader/modules/readerstyletweak.lua），写到其它位置的
 -- 文件永远不会被 Style tweaks 机制装载；该目录由 KOReader 启动时自动创建。
@@ -149,14 +163,19 @@ local function setTweakEnabled(ui, enabled)
     end
 end
 
-local function applyStyle(self, config)
+-- opts.skip_persist: only resync CSS/painter (used on book open); do not write a default table into doc_settings
+local function applyStyle(self, config, opts)
     local ui = self.ui
     if not ui or not ui.doc_settings then return end
-    ui.doc_settings:saveSetting(CONFIG_KEY, config)
 
     -- 互斥只发生在下划线这一层：绘制模式下不生成下划线 CSS，
     -- 结构类特效两种模式下都照常生成
     local paint_mode = getRenderMode() == "paint"
+    -- paint 下 para/em 无效：统一清回 none（开书同步、切模式、点预设都会走到这里）
+    local corrected = normalizeUnderlineForMode(config, paint_mode and "paint" or "css")
+    if corrected or not (opts and opts.skip_persist) then
+        ui.doc_settings:saveSetting(CONFIG_KEY, config)
+    end
     local parts = {}
     if not paint_mode then
         local underline = buildUnderlineCss(config)
@@ -248,9 +267,12 @@ end
 function TypeFolio:onReaderReady()
     if self.ui.paging then return end
     self.painter = Painter:new{}
-    self.painter.enabled = getRenderMode() == "paint"
-    self.painter:setConfig(getConfig(self.ui))
+    -- Register first; applyStyle sets enabled/setConfig for the current render mode.
     self.view:registerViewModule("typefolio_painter", self.painter)
+    -- styletweaks/99_typefolio.css is a single shared file. On each book open, rewrite it
+    -- from this book's typefolio_config so the previous book's rules do not leak here
+    -- (menu checks can be correct while the on-screen CSS is still stale).
+    applyStyle(self, getConfig(self.ui), { skip_persist = true })
 end
 
 -- Painter 在 view_modules 里，收不到事件；本插件在 ReaderUI 的数组里，能收到，
@@ -281,7 +303,11 @@ function TypeFolio:_renderModeItems()
             checked_func = function() return getRenderMode() == option.key end,
             callback = function(touchmenu_instance)
                 G_reader_settings:saveSetting(RENDER_MODE_KEY, option.key)
-                applyStyle(self, getConfig(self.ui))
+                local config = getConfig(self.ui)
+                if normalizeUnderlineForMode(config, option.key) then
+                    notify(tr("Paragraph/emphasis underlines need CSS mode; reset to None."))
+                end
+                applyStyle(self, config)
                 if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         })
@@ -321,13 +347,20 @@ function TypeFolio:_thicknessDialog()
                 text = tr("Set"),
                 is_enter_default = true,
                 callback = function()
-                    local value = (dialog:getInputText() or ""):gsub("%s+", "")
-                    if value ~= "" then
-                        if not value:find("px") then value = value .. "px" end
-                        config.line_thickness = value
-                        applyStyle(self, config)
-                        notify(T(tr("Thickness set to %1"), value))
+                    local raw = (dialog:getInputText() or ""):gsub("%s+", ""):gsub("[pP][xX]$", "")
+                    local num = tonumber(raw)
+                    if not num or num <= 0 then
+                        notify(tr("Enter a positive number (e.g. 1.5)"))
+                        return
                     end
+                    if num > 20 then num = 20 end
+                    -- trim noisy floats (1.50 -> 1.5) while keeping integers clean
+                    local value = (num == math.floor(num))
+                        and (string.format("%d", num) .. "px")
+                        or (string.format("%.2f", num):gsub("0+$", ""):gsub("%.$", "") .. "px")
+                    config.line_thickness = value
+                    applyStyle(self, config)
+                    notify(T(tr("Thickness set to %1"), value))
                     UIManager:close(dialog)
                 end,
             },
@@ -854,6 +887,14 @@ function TypeFolio:_helpSubItems()
                     tr("HELP_TITLE"),
                     "",
                     tr("HELP_RENDERING"),
+                    "",
+                    tr("HELP_PAINT_LIMITS"),
+                    "",
+                    tr("HELP_SKIP_HEADINGS"),
+                    "",
+                    tr("HELP_DIALOGUE"),
+                    "",
+                    tr("HELP_PURE_BLACK"),
                 }
                 showInfo(table.concat(help_lines, "\n"))
             end,
@@ -865,7 +906,7 @@ function TypeFolio:_helpSubItems()
                 local help_lines = {
                     tr("HELP_CALIBRE_REGEX_TITLE"),
                     "",
-                    tr("HELP_DIALOGUE"),
+                    tr("HELP_CALIBRE_UNDERLINE"),
                     "",
                     tr("HELP_CALIBRE_DIALOGUE"),
                     "",

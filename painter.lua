@@ -31,6 +31,24 @@ local Painter = WidgetContainer:extend{
     boxes = nil,
 }
 
+-- 目录/翻页跳转瞬间，crengine 的页位与 xpointer 正处在布局瞬变中，
+-- getWordBoxesFromPositions / getTextFromPositions / getNearestWordFromPosition
+-- 都可能抛错。这里把整段取框流程包进 pcall，宁可这一帧不画线，
+-- 也不让异常冒进 ReaderView.paintTo 的主循环。
+local function safeCall(fn)
+    local ok, a, b, c = pcall(fn)
+    if ok then return a, b, c end
+    return nil
+end
+
+-- 双页 / 末页换算在跳转瞬间不一致时，下界可能回到上界之前；
+-- 逆序区间对 getWordBoxesFromPositions 没有保护，提前掐掉。
+local function isOrderedRange(document, xp0, xp1)
+    if not (xp0 and xp1) then return false end
+    local ok, cmp = pcall(document.compareXPointers, document, xp0, xp1)
+    return ok and cmp == 1
+end
+
 function Painter:setConfig(config)
     local underline = config.underline or "none"
     self.underline = UNDERLINE_ALIASES[underline] or underline
@@ -72,10 +90,12 @@ end
 -- （见 readerlink.lua:1148）。getNearestWordFromPosition 是 cache_by_tag，
 -- 不会作废页面位图，可以安全地按页调用。
 local function isSkippableLine(document, box)
-    local nearest = document:getNearestWordFromPosition(
-        { x = box.x + 2, y = box.y + math.floor(box.h / 2) })
-    local xp = nearest and nearest.pos0
-    if not xp then return false end
+    local nearest = safeCall(function()
+        return document:getNearestWordFromPosition(
+            { x = box.x + 2, y = box.y + math.floor(box.h / 2) })
+    end)
+    local xp = type(nearest) == "table" and nearest.pos0
+    if type(xp) ~= "string" then return false end
     return xp:find("/h%d") ~= nil or xp:find("/blockquote") ~= nil
 end
 
@@ -87,15 +107,21 @@ function Painter:getLineBoxes()
 
     local screen = Geom:new{ x = 0, y = 0, w = Screen:getWidth(), h = Screen:getHeight() }
     local raw
-    local xp0, xp1 = visibleRangeXPointers(document)
-    if xp0 and xp1 then
-        raw = document:getScreenBoxesFromPositions(xp0, xp1, true)
+    local xp0_ok, xp0, xp1 = pcall(visibleRangeXPointers, document)
+    if not xp0_ok then xp0, xp1 = nil, nil end
+    if xp0 and xp1 and isOrderedRange(document, xp0, xp1) then
+        raw = safeCall(function()
+            return document:getScreenBoxesFromPositions(xp0, xp1, true)
+        end)
     end
-    if not raw or #raw == 0 then
+    if type(raw) ~= "table" or #raw == 0 then
         -- 末页取不到下界，或该书的 xpointer 路径失效：退回全屏取词，代价是一次整页重绘
-        local text = document:getTextFromPositions(
-            { x = 0, y = 0 }, { x = screen.w, y = screen.h }, true)
+        local text = safeCall(function()
+            return document:getTextFromPositions(
+                { x = 0, y = 0 }, { x = screen.w, y = screen.h }, true)
+        end)
         raw = text and text.sboxes or {}
+        if type(raw) ~= "table" then raw = {} end
     end
 
     -- getPageXPointer 可能落在块起点而非页内首个文字节点，取回的框会越过页顶/页底，

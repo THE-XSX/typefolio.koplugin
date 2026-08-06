@@ -7,5 +7,5 @@ return {
     name = "typefolio",
     fullname = translate("Type Folio"),
     description = translate("Underline and typesetting tweaks for CRE books, applied through KOReader's Style tweaks mechanism."),
-    version = "2.1.1",
+    version = "2.1.2",
 }
