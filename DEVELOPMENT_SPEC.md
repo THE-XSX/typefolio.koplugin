@@ -81,3 +81,30 @@ end
    - 打开目录跳转验证是否崩溃。
    - 尝试非法输入验证提示是否生效。
 4. **测试无误后打勾提交**。
+
+---
+
+## 四、 Release 发布规范与打包标准 (Release Specification)
+
+### 1. 版本与发布前检查
+- **三处版本号一致**：检查 `_meta.lua` 中的 `version`、`README.md` changelog 中的最新版本号、Git Tag 保持完全一致（格式如 `v2.1.2`）。
+- **打包排除杂质**：Zip 安装包根目录必须包含插件根文件夹（如 `typefolio.koplugin/`），且严格排除 `.git/`、`.DS_Store` 及临时构建缓存。
+
+### 2. Release Notes / 变更说明模板格式
+版本发布时，Release 文档/页面描述须统一采用**标准 Markdown 中英双语分块格式**，每条均使用无序列表及加粗标题简明总结变动：
+
+```markdown
+# Release vX.Y.Z
+
+## What's Changed / 变更说明
+
+### 中文 (Simplified Chinese)
+- **模块/功能名**：变更说明...
+- **模块/功能名**：变更说明...
+
+### English
+- **Module/Feature**: Change description...
+- **Module/Feature**: Change description...
+```
+
+
