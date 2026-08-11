@@ -13,7 +13,7 @@ local function normalizeCode(code)
 end
 
 function Registry.new(plugin_root)
-    local interface = dofile(plugin_root .. "locale_interface.lua")
+    local interface = dofile(plugin_root .. "i18n/locale_interface.lua")
     local self = setmetatable({
         ordered = {},
         by_id = {},
@@ -21,7 +21,7 @@ function Registry.new(plugin_root)
     }, Registry)
 
     for _, filename in ipairs(LOCALE_FILES) do
-        local source = "locales/" .. filename .. ".lua"
+        local source = "i18n/locales/" .. filename .. ".lua"
         local locale = interface.validate(dofile(plugin_root .. source), source)
         if self.by_id[locale.id] then
             error("Duplicate locale id: " .. locale.id)

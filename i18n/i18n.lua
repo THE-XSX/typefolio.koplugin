@@ -24,7 +24,7 @@ end
 
 function I18n.new(plugin_root, options)
     options = options or {}
-    local registry = dofile(plugin_root .. "locale_registry.lua").new(plugin_root)
+    local registry = dofile(plugin_root .. "i18n/locale_registry.lua").new(plugin_root)
     return setmetatable({
         registry = registry,
         language_setting = options.language_setting or "book_receipt_language",

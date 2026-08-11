@@ -11,9 +11,11 @@ CSSTemplates.defaults = {
 }
 
 -- 构建动态下划线 CSS (纯外科手术级样式，绝对不破坏原书段落首行缩进与行距)
-function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern)
+function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern, skip_headings, skip_blockquotes)
     thickness = thickness or "1.5px"
     dash_pattern = dash_pattern or "normal"
+    if skip_headings == nil then skip_headings = true end
+    if skip_blockquotes == nil then skip_blockquotes = true end
 
     -- 兼容旧键名
     if key == "all_lines_dashed_compat" or key == "all_lines_dashed" or key == "all_lines_solid" or key == "all_lines_dotted" or key == "thick_lines" then
@@ -45,31 +47,59 @@ function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern)
     end
 
     if key == "all_lines" then
-        if line_style == "solid" and cur_thickness == "1.5px" then
-            -- 实线直接使用原生下划线，性能最好且 100% 保护所有排版
-            return [[
-                /* 全局文字逐行实下划线 (自动排除标题) */
-                p span, p em, p i, p u, p a, p font, p b, p strong, div > span, blockquote span {
-                    text-decoration: underline !important;
-                }
-                h1 span, h2 span, h3 span, h4 span, h5 span, h6 span,
-                p[align="center"] span, p[align="CENTER"] span, .title span, .chapter-title span, .calibre13 span {
+        local include_selectors = { "p span", "p em", "p i", "p u", "p a", "p font", "p b", "p strong", "div > span" }
+        if not skip_blockquotes then
+            table.insert(include_selectors, "blockquote span")
+        end
+
+        local exclude_selectors = {}
+        if skip_headings then
+            table.insert(exclude_selectors, "h1 span, h2 span, h3 span, h4 span, h5 span, h6 span")
+            table.insert(exclude_selectors, "p[align=\"center\"] span, p[align=\"CENTER\"] span, p[align=\"centre\"] span, p[align=\"middle\"] span")
+            table.insert(exclude_selectors, ".title span, .chapter-title span, .chaptertitle span, .calibre13 span, p.center span, div.center span")
+            table.insert(exclude_selectors, "p[style*=\"center\"] span, p[style*=\"CENTER\"] span")
+        end
+        if skip_blockquotes then
+            table.insert(exclude_selectors, "blockquote span")
+        end
+
+        local inc_str = table.concat(include_selectors, ", ")
+        local exc_css = ""
+        if #exclude_selectors > 0 then
+            local exc_str = table.concat(exclude_selectors, ",\n")
+            if line_style == "solid" and cur_thickness == "1.5px" then
+                exc_css = string.format([[
+                %s {
                     text-decoration: none !important;
                 }
-            ]]
-        else
-            return string.format([[
-                /* 全局文字逐行下划线 (完全保护原书段落 display:block，缩进与段距 100%% 正常) */
-                p span, p em, p i, p u, p a, p font, p b, p strong, div > span, blockquote span {
-                    text-decoration: none !important;
-                    border-bottom: %s %s #000000 !important;
-                }
-                h1 span, h2 span, h3 span, h4 span, h5 span, h6 span,
-                p[align="center"] span, p[align="CENTER"] span, .title span, .chapter-title span, .calibre13 span {
+                ]], exc_str)
+            else
+                exc_css = string.format([[
+                %s {
                     border-bottom: none !important;
                     text-decoration: none !important;
                 }
-            ]], tostring(cur_thickness), line_style)
+                ]], exc_str)
+            end
+        end
+
+        if line_style == "solid" and cur_thickness == "1.5px" then
+            return string.format([[
+                /* 全局文字逐行实下划线 */
+                %s {
+                    text-decoration: underline !important;
+                }
+                %s
+            ]], inc_str, exc_css)
+        else
+            return string.format([[
+                /* 全局文字逐行下划线 */
+                %s {
+                    text-decoration: none !important;
+                    border-bottom: %s %s #000000 !important;
+                }
+                %s
+            ]], inc_str, tostring(cur_thickness), line_style, exc_css)
         end
     elseif key == "para" then
         return string.format([[
@@ -103,11 +133,14 @@ end
 -- 每个特效是 function(params) -> css；params 缺省时由各自的 defaults 兜底。
 CSSTemplates.tweak_defaults = {
     dialogue_style = { tint = true, tint_level = "light", bold = false, italic = false },
-    header_border = { border = "both", line_style = "solid", thickness = 1, centered = true },
-    custom_hr_dashed = { line_style = "dashed", thickness = 2, width = 85 },
+    header_border = { border = "both", line_style = "solid", thickness = 1, centered = true,
+        include_centered = true },
+    chapter_pagebreak = { include_centered = true },
     blockquote_box = { bar = 5, tint = "light", italic = true },
     drop_caps = { scale = 2.1, bold = true },
     pure_black = {},
+    body_bold = {},
+    body_italic = {},
 }
 
 -- 参数取值域，菜单与模板共用一份，避免两处各写各的
@@ -116,11 +149,38 @@ CSSTemplates.tweak_options = {
     line_style = { "solid", "dashed", "dotted" },
     border = { "both", "bottom", "top", "none" },
     tint = { "none", "light", "medium" },
-    width = { 50, 70, 85, 100 },
-    bar = { 0, 3, 5, 8 },
 }
 
 local TINT_COLORS = { none = nil, light = "#e0e0e0", medium = "#c8c8c8" }
+
+-- Calibre-converted EPUBs often carry no heading tags at all and mark chapter
+-- titles as center-aligned paragraphs. Both "chapter page break" and "chapter
+-- title decoration" need to recognise them, so the selector list lives here
+-- once instead of being spelled out (and drifting) in each template.
+local CENTERED_TITLE_SELECTORS = {
+    'p[align="center"]', 'p[align="CENTER"]',
+    'p[align="centre"]', 'p[align="middle"]',
+}
+
+local function centeredTitleSelectors(suffix, prefix)
+    local out = {}
+    for _, sel in ipairs(CENTERED_TITLE_SELECTORS) do
+        table.insert(out, (prefix or "") .. sel .. (suffix or ""))
+    end
+    return table.concat(out, ", ")
+end
+
+-- Every centered-title selector paired with every other, for the
+-- adjacent-sibling rules that treat "title + subtitle" as one block.
+local function centeredTitlePairs()
+    local out = {}
+    for _, first in ipairs(CENTERED_TITLE_SELECTORS) do
+        for _, second in ipairs(CENTERED_TITLE_SELECTORS) do
+            table.insert(out, first .. " + " .. second)
+        end
+    end
+    return table.concat(out, ",\n        ")
+end
 
 CSSTemplates.layout_tweaks = {
     dialogue_style = function(params)
@@ -200,6 +260,8 @@ CSSTemplates.layout_tweaks = {
         local thickness = (params and params.thickness) or defaults.thickness
         local centered = params and params.centered
         if centered == nil then centered = defaults.centered end
+        local include_centered = params and params.include_centered
+        if include_centered == nil then include_centered = defaults.include_centered end
 
         local rule = string.format("%dpx %s #000000 !important;", thickness, style)
         local decls = {}
@@ -216,30 +278,37 @@ CSSTemplates.layout_tweaks = {
             table.insert(decls, "width: 85% !important;")
         end
 
-        return string.format([[
+        local css = string.format([[
         /* 章节标题装饰 */
         h1, h2, h3, .title, .chapter-title, .calibre13 {
             %s
         }
     ]], table.concat(decls, "\n            "))
-    end,
 
-    custom_hr_dashed = function(params)
-        local defaults = CSSTemplates.tweak_defaults.custom_hr_dashed
-        local style = (params and params.line_style) or defaults.line_style
-        local thickness = (params and params.thickness) or defaults.thickness
-        local width = (params and params.width) or defaults.width
-
-        return string.format([[
-        /* 章尾/正文与脚注间的分隔线 */
-        hr, .hr, .break, .separator, .asterisk, .ornament, .scene-break, .section-break, .split, div.break, p.break, section.fnote, aside.calibre16, .fnote {
-            border: none !important;
-            border-top: %dpx %s #000000 !important;
-            height: 0px !important;
-            margin: 2em auto 1.2em auto !important;
-            width: %d%% !important;
+        if include_centered then
+            -- Same fallback the page-break tweak uses: books converted without
+            -- heading tags mark titles as centered paragraphs.
+            css = css .. string.format([[
+        /* Centered-paragraph titles (EPUBs converted without heading tags) */
+        %s {
+            %s
         }
-    ]], thickness, style, width)
+        /* A centered line that merely follows another is a subtitle inside the
+           same title block, so it must not get its own frame. crengine has no
+           :has(), so the run cannot be detected from the first line; dropping
+           the border on followers is what keeps one title from being boxed
+           twice. Adjacent-sibling "+" is supported (used by the engine's own
+           MathML sheet). */
+        %s {
+            border-top: none !important;
+            border-bottom: none !important;
+            padding-top: 0 !important;
+            margin-top: 0 !important;
+        }
+    ]], centeredTitleSelectors(), table.concat(decls, "\n            "),
+                centeredTitlePairs())
+        end
+        return css
     end,
 
     drop_caps = function(params)
@@ -273,11 +342,109 @@ CSSTemplates.layout_tweaks = {
     ]], scale, bold and "bold" or "normal")
     end,
 
+
+    chapter_pagebreak = function(params)
+        local defaults = CSSTemplates.tweak_defaults.chapter_pagebreak
+        local include_centered = params and params.include_centered
+        if include_centered == nil then include_centered = defaults.include_centered end
+
+        local heading_css = [[
+        /* Force a new page before chapter headings inside multi-chapter HTML */
+        h1, h2, h3, .title, .chapter-title, .calibre13, .chaptertitle {
+            page-break-before: always !important;
+            break-before: page !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        /* Only skip the very first heading in the document to avoid a blank opening page.
+           Do not use bare "div > h2:first-child", or mid-book chapter wrappers lose the break. */
+        body > h1:first-child, body > h2:first-child, body > h3:first-child,
+        body > .title:first-child, body > .chapter-title:first-child,
+        body > .calibre13:first-child, body > .chaptertitle:first-child,
+        body > section:first-child > h1:first-child,
+        body > section:first-child > h2:first-child,
+        body > section:first-child > h3:first-child,
+        body > section:first-child > .title:first-child,
+        body > section:first-child > .chapter-title:first-child,
+        body > div:first-child > h1:first-child,
+        body > div:first-child > h2:first-child,
+        body > div:first-child > h3:first-child,
+        body > div:first-child > .title:first-child,
+        body > div:first-child > .chapter-title:first-child {
+            page-break-before: auto !important;
+            break-before: auto !important;
+        }
+        ]]
+        if include_centered then
+            heading_css = heading_css .. [[
+        /* Centered-title fallback for EPUBs converted without heading tags
+           (calibre "p > font > b" templates): treat center-aligned paragraphs
+           as chapter titles. Quoted CSS2.1 form, supported everywhere. */
+        ]] .. centeredTitleSelectors() .. [[ {
+            page-break-before: always !important;
+            break-before: page !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        /* Mixed-case variants, kept in a separate block: the case-insensitive
+           attribute flag is used by KOReader's own html5.css, but isolating it
+           means a parser rejection cannot discard the rule above. */
+        p[align=center i], p[align=centre i], p[align=middle i] {
+            page-break-before: always !important;
+            break-before: page !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+        }
+        /* The first title in each DocFragment already gets a break from
+           epub.css, so suppress ours there to avoid a blank page. */
+        ]] .. centeredTitleSelectors(":first-child", "body > ") .. [[,
+        ]] .. centeredTitleSelectors(":first-child", "body > div:first-child > ") .. [[,
+        ]] .. centeredTitleSelectors(":first-child", "body > section:first-child > ") .. [[ {
+            page-break-before: auto !important;
+            break-before: auto !important;
+        }
+        /* Consecutive centered lines are one title block (title + subtitle),
+           not two chapters. */
+        ]] .. centeredTitlePairs() .. [[ {
+            page-break-before: avoid !important;
+            break-before: avoid !important;
+        }
+        ]]
+        end
+        return heading_css
+    end,
+
     pure_black = function()
         return [[
-        /* 强制所有深灰/浅灰文字为纯黑色 (提升墨水屏对比度) */
+        /* Force pure black text for higher e-ink contrast */
         body, p, div, span, li, a, .calibre14 {
             color: #000000 !important;
+        }
+    ]]
+    end,
+
+    body_bold = function()
+        return [[
+        /* Global body bold via CSS; headings are not selected so original weight stays */
+        p, li, td, th, blockquote,
+        p span, p em, p i, p u, p a, p font, p b, p strong,
+        li span, blockquote p, blockquote span, div > span {
+            font-weight: bold !important;
+        }
+    ]]
+    end,
+
+    body_italic = function()
+        return [[
+        /* Global body italic via CSS; headings are not selected so original style stays */
+        p, li, td, th, blockquote,
+        p span, p em, p i, p u, p a, p font, p b, p strong,
+        li span, blockquote p, blockquote span, div > span {
+            font-style: italic !important;
         }
     ]]
     end,
@@ -288,19 +455,19 @@ CSSTemplates.layout_tweaks = {
 -- translations to locales/*.lua (the menu renders them through translate()).
 CSSTemplates.presets = {
     all_dashed_mode = {
-        name = "All-line dashes (standard)",
+        name = "All-line dashes",
         underline = "all_lines_dashed_compat",
         tweaks = { pure_black = true }
     },
     study = {
-        name = "Study notes (emphasis underline + quote boxes)",
+        name = "Study notes",
         underline = "em_only",
         tweaks = { blockquote_box = true, pure_black = true }
     },
     vintage = {
-        name = "Vintage newspaper (headers + drop caps + rules)",
+        name = "Vintage newspaper",
         underline = "em_only",
-        tweaks = { drop_caps = true, header_border = true, custom_hr_dashed = true }
+        tweaks = { drop_caps = true, header_border = true }
     }
 }
 
