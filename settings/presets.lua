@@ -41,11 +41,12 @@ function PresetsSettings.customPresetEntryItems(ctx, name)
         {
             text = tr("Apply this preset"),
             keep_menu_open = true,
-            callback = function()
+            callback = function(touchmenu_instance)
                 local preset = getCustomPresets()[name]
                 if preset then
                     applyStyle(Config.clone(preset))
                     notify(T(tr("Applied preset: %1"), name))
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
                 end
             end,
         },
@@ -332,30 +333,33 @@ function PresetsSettings.items(ctx)
         table.insert(items, {
             text = T(tr("Preset: %1"), tr(preset.name)),
             keep_menu_open = true,
-            callback = function()
-                local config = {
-                    underline = preset.underline,
-                    line_thickness = getConfig(ui).line_thickness,
-                    dash_pattern = preset.dash_pattern or "normal",
-                    tweaks = {},
-                    tweak_params = getConfig(ui).tweak_params,
-                    skip_headings = getConfig(ui).skip_headings,
-                    folio_scene = getConfig(ui).folio_scene,
-                    awareness = getConfig(ui).awareness,
-                    semantic_drawing = getConfig(ui).semantic_drawing,
-                }
+            callback = function(touchmenu_instance)
+                -- Start from the reader's current config and let the preset overwrite only
+                -- what it actually defines. This used to be a hand-written list of the keys
+                -- worth carrying over, which meant every setting added afterwards -- the
+                -- dialogue and emphasis painters, "skip blockquotes" -- was absent from the
+                -- table and Config.normalize quietly reset it to its default the first time
+                -- a preset was applied. getConfig already returns a normalized copy, so
+                -- mutating it here cannot touch the stored config.
+                local config = getConfig(ui)
+                config.underline = preset.underline
+                config.dash_pattern = preset.dash_pattern or "normal"
+                -- A preset is not a KOReader-settings payload; drop anything left over.
+                config.koreader_settings = {}
+                config.tweaks = {}
                 for tweak, enabled in pairs(preset.tweaks) do
                     config.tweaks[tweak] = enabled
                 end
                 applyStyle(config)
                 notify(T(tr("Applied preset: %1"), tr(preset.name)))
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         })
     end
     table.insert(items, {
         text = tr("Restore default typesetting"),
         keep_menu_open = true,
-        callback = function()
+        callback = function(touchmenu_instance)
             applyStyle({
                 underline = "none",
                 line_thickness = "1.5px",
@@ -364,6 +368,7 @@ function PresetsSettings.items(ctx)
                 tweak_params = {},
             })
             notify(tr("All typesetting tweaks reset"))
+            if touchmenu_instance then touchmenu_instance:updateItems() end
         end,
     })
     table.insert(items, {

@@ -89,6 +89,7 @@ end
 ### 1. 版本与发布前检查
 - **三处版本号一致**：检查 `_meta.lua` 中的 `version`、`README.md` changelog 中的最新版本号、Git Tag 保持完全一致（格式如 `v2.1.2`）。
 - **打包排除杂质**：Zip 安装包根目录必须包含插件根文件夹（如 `typefolio.koplugin/`），且严格排除 `.git/`、`.DS_Store` 及临时构建缓存。
+- **用脚本打包，不要手工 zip**：在仓库根目录执行 `python3 tools/package.py`，产物为 `typefolio.koplugin.zip`。在仓库内直接 `zip -r … .` 会把 `main.lua`、`core/` 等摊在压缩包根目录，解压进 `koreader/plugins/` 后文件散落一地、插件根本不会加载——这正是脚本存在的原因。脚本会在写出后重新打开压缩包自检：全部条目位于 `typefolio.koplugin/` 之下、`_meta.lua` 与 `main.lua` 存在、`tests/`、`.git/`、`.DS_Store`、`*.py`、旧 zip 均未混入，任一项不满足即报错退出（`-l` 可列出全部打包文件）。
 
 ### 2. Release Notes / 变更说明模板格式
 版本发布时，Release 文档/页面描述须统一采用**标准 Markdown 中英双语分块格式**，每条均使用无序列表及加粗标题简明总结变动：

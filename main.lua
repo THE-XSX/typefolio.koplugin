@@ -13,6 +13,7 @@ local SelectorHelper = dofile(PLUGIN_ROOT .. "tools/selector_helper.lua")
 local Painter = dofile(PLUGIN_ROOT .. "painters/painter.lua")
 local ContextPainter = dofile(PLUGIN_ROOT .. "painters/context_painter.lua")
 local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
+local PerfCounter = dofile(PLUGIN_ROOT .. "core/perf_counter.lua")
 local RenderPlanner = dofile(PLUGIN_ROOT .. "core/render_planner.lua")
 local Engine = dofile(PLUGIN_ROOT .. "core/engine.lua")
 local FolioScene = dofile(PLUGIN_ROOT .. "core/folio_scene.lua")
@@ -34,6 +35,8 @@ local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
+local time = require("ui/time")
 local util = require("util")
 local Screen = Device.screen
 local T = require("ffi/util").template
@@ -43,8 +46,13 @@ local CONFIG_KEY = "typefolio_config"
 local TWEAK_ID = "99_typefolio.css"
 local CUSTOM_PRESETS_KEY = "typefolio_custom_presets"
 local LEGACY_EXPERIMENT_BACKUP_KEY = "typefolio_experiment_backup"
-local PLUGIN_VERSION = "3.0.4"
+-- Taken from _meta.lua rather than restated here: this string is stamped into every
+-- exported preset and into the performance report, and a second copy had already
+-- drifted a release behind.
+local PLUGIN_VERSION = (dofile(PLUGIN_ROOT .. "_meta.lua") or {}).version or "0.0.0"
 local PRESET_FOLDER_NAME = "typefolio_presets"
+local PERF_ENABLED_KEY = "typefolio_performance_counters"
+local PERF_REPORT_FILENAME = "typefolio-performance.log"
 
 local RENDER_POLICY_KEY = "typefolio_render_policy"
 local LEGACY_RENDER_MODE_KEY = "typefolio_render_mode"
@@ -398,7 +406,14 @@ local function applyStyle(self, config, opts)
         config = Config.clone(config)
         config.koreader_settings = {}
     end
-    local result = self.engine:apply(config, { persist = persist })
+    local result
+    if self.perf_counter then
+        result = self.perf_counter:measure("phase.engine.apply", function()
+            return self.engine:apply(config, { persist = persist })
+        end)
+    else
+        result = self.engine:apply(config, { persist = persist })
+    end
     FolioScene.publish(self.ui, result.config, persist)
     self.last_apply = result
     return result
@@ -490,6 +505,23 @@ local FOLIO_SCENE_LABELS = {
     study = "Study notes",
     editorial = "Editorial",
     chapter = "Chapter focus",
+    swiss = "Swiss grid",
+    terminal = "Terminal",
+    quote = "Quote poster",
+    ticket = "Ticket stub",
+    cover = "Cover first",
+    gallery = "Gallery folio",
+    dossier = "Reading dossier",
+    archive = "Library archive",
+    bookpost = "Book post",
+    architecture = "Reading architecture",
+    zen = "Japanese minimal",
+    mei = "Plum blossom",
+    lan = "Orchid",
+    zhu = "Bamboo",
+    ju = "Chrysanthemum",
+    custom = "Custom layout",
+    random = "Random style",
 }
 
 local function folioSceneLabel(value)
@@ -547,20 +579,27 @@ function TypeFolio:_initEngine()
             end
         end,
         apply_painter = function(enabled, config)
+            if self.perf_counter then self.perf_counter:mark("config.apply_painter") end
             if self.painter then
                 self.painter.enabled = enabled
                 self.painter:setConfig(config)
             end
             if self.context_painter then self.context_painter:setConfig(config) end
-            if self.book_context then self.book_context:invalidate() end
+            if self.book_context then self.book_context:invalidate("config_apply") end
         end,
         refresh = function()
+            if self.perf_counter then self.perf_counter:mark("paint.refresh_requested") end
             UIManager:setDirty(self.ui.view and self.ui.view.dialog, "partial")
         end,
     })
 end
 
 function TypeFolio:init()
+    self.perf_counter = PerfCounter.new{
+        enabled = G_reader_settings:readSetting(PERF_ENABLED_KEY) == true,
+        clock = function() return time.to_ms(time.monotonic()) end,
+    }
+    self.perf_counter:mark("event.plugin_init")
     self:_initEngine()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
@@ -601,15 +640,24 @@ end
 
 function TypeFolio:onReaderReady()
     if self.ui.paging then return end
+    if self.perf_counter then self.perf_counter:mark("event.reader_ready") end
     self.book_context = BookContext.new{
         ui = self.ui,
         screen_size = function() return Screen:getWidth(), Screen:getHeight() end,
+        perf = self.perf_counter,
     }
-    self.semantic_index = SemanticIndex.new{ context = self.book_context }
-    self.painter = Painter:new{ context = self.book_context }
+    self.semantic_index = SemanticIndex.new{
+        context = self.book_context,
+        perf = self.perf_counter,
+    }
+    self.painter = Painter:new{
+        context = self.book_context,
+        perf = self.perf_counter,
+    }
     self.context_painter = ContextPainter:new{
         context = self.book_context,
         semantic_index = self.semantic_index,
+        perf = self.perf_counter,
     }
     self.view:registerViewModule("typefolio_painter", self.painter)
     self.view:registerViewModule("typefolio_context_painter", self.context_painter)
@@ -621,18 +669,94 @@ function TypeFolio:onReaderReady()
     applyStyle(self, getConfig(self.ui), { skip_persist = true })
 end
 
-function TypeFolio:_invalidatePainter()
-    if self.book_context then self.book_context:invalidate() end
-    if self.semantic_index then self.semantic_index:invalidate() end
+function TypeFolio:_invalidatePainter(reason)
+    reason = reason or "unknown"
+    if self.perf_counter then self.perf_counter:mark("event." .. reason) end
+    if self.book_context then self.book_context:invalidate(reason) end
+    if self.semantic_index then self.semantic_index:invalidate(reason) end
 end
 
-TypeFolio.onPageUpdate = TypeFolio._invalidatePainter
-TypeFolio.onPosUpdate = TypeFolio._invalidatePainter
-TypeFolio.onDocumentRerendered = TypeFolio._invalidatePainter
-TypeFolio.onDocumentPartiallyRerendered = TypeFolio._invalidatePainter
-TypeFolio.onChangeViewMode = TypeFolio._invalidatePainter
-TypeFolio.onSetPageMargins = TypeFolio._invalidatePainter
-TypeFolio.onSetStatusLine = TypeFolio._invalidatePainter
+function TypeFolio:onPageUpdate() self:_invalidatePainter("page_update") end
+function TypeFolio:onPosUpdate() self:_invalidatePainter("pos_update") end
+function TypeFolio:onDocumentRerendered() self:_invalidatePainter("document_rerendered") end
+function TypeFolio:onDocumentPartiallyRerendered() self:_invalidatePainter("document_partially_rerendered") end
+function TypeFolio:onChangeViewMode() self:_invalidatePainter("change_view_mode") end
+function TypeFolio:onSetPageMargins() self:_invalidatePainter("set_page_margins") end
+function TypeFolio:onSetStatusLine() self:_invalidatePainter("set_status_line") end
+
+function TypeFolio:_setPerformanceCountersEnabled(enabled)
+    enabled = enabled == true
+    G_reader_settings:saveSetting(PERF_ENABLED_KEY, enabled)
+    if not self.perf_counter then return end
+    if enabled then
+        self.perf_counter:setEnabled(true)
+        self.perf_counter:reset()
+        self.perf_counter:mark("event.counters_enabled")
+    else
+        self.perf_counter:mark("event.counters_disabled")
+        self.perf_counter:setEnabled(false)
+    end
+end
+
+function TypeFolio:_resetPerformanceCounters()
+    if not self.perf_counter then return end
+    self.perf_counter:reset()
+    self.perf_counter:mark("event.counters_reset")
+end
+
+function TypeFolio:_performanceReport()
+    local config = getConfig(self.ui)
+    local chapter = config.awareness and config.awareness.chapter or {}
+    local chapter_start = chapter.start and chapter.start.enabled == true
+    local chapter_end = chapter["end"] and chapter["end"].enabled == true
+    local configurable = self.ui and self.ui.document and self.ui.document.configurable or {}
+    local report_path = DataStorage:getDataDir() .. "/" .. PERF_REPORT_FILENAME
+    local lines = {
+        "Type Folio performance report",
+        "format_version=1",
+        "generated_at=" .. os.date("%Y-%m-%d %H:%M:%S"),
+        "typefolio_version=" .. PLUGIN_VERSION,
+        "report_path=" .. report_path,
+        string.format("screen=%dx%d", Screen:getWidth(), Screen:getHeight()),
+        "view_mode=" .. tostring(configurable.view_mode or "unknown"),
+        "visible_pages=" .. tostring(configurable.visible_pages or "unknown"),
+        "render_policy=" .. tostring(getRenderPolicy()),
+        "underline=" .. tostring(config.underline),
+        "dash_pattern=" .. tostring(config.dash_pattern),
+        "skip_headings=" .. tostring(config.skip_headings ~= false),
+        "skip_blockquotes=" .. tostring(config.skip_blockquotes ~= false),
+        "semantic_drawing=" .. tostring(config.semantic_drawing.enabled == true),
+        "semantic_diagnostics=" .. tostring(config.semantic_drawing.diagnostics == true),
+        "dialogue_painter=" .. tostring(config.dialogue_painter.enabled == true),
+        "dialogue_mode=" .. tostring(config.dialogue_painter.mode),
+        "dialogue_lang=" .. tostring(config.dialogue_painter.lang),
+        "emphasis_painter=" .. tostring(config.emphasis_painter.enabled == true),
+        "chapter_start=" .. tostring(chapter_start),
+        "chapter_end=" .. tostring(chapter_end),
+        "",
+        self.perf_counter and self.perf_counter:format() or "counter_unavailable=true",
+    }
+    return table.concat(lines, "\n"), report_path
+end
+
+function TypeFolio:_logPerformanceReport(report)
+    for line in (report .. "\n"):gmatch("(.-)\n") do
+        logger.info("[TYPEFOLIO-PERF]", line)
+    end
+end
+
+function TypeFolio:_getPerformanceReport()
+    if self.perf_counter then self.perf_counter:mark("event.report_generated") end
+    local report, path = self:_performanceReport()
+    local file, err = io.open(path, "w")
+    if file then
+        file:write(report)
+        file:write("\n")
+        file:close()
+    end
+    self:_logPerformanceReport(report)
+    return report, file and path or nil, err
+end
 
 function TypeFolio:_getParam(tweak_key, name)
     local params = getConfig(self.ui).tweak_params[tweak_key]
@@ -1004,6 +1128,7 @@ function TypeFolio:_buildContext()
         tr = tr,
         T = T,
         Screen = Screen,
+        Device = Device,
         Config = Config,
         RENDER_POLICY_KEY = RENDER_POLICY_KEY,
         getRenderPolicy = getRenderPolicy,
@@ -1027,6 +1152,21 @@ function TypeFolio:_buildContext()
         setLastSelectorSnippet = function(val) self.last_selector_snippet = val end,
         folioSceneLabel = function(val) return folioSceneLabel(val) end,
         enabledEffects = function(config) return enabledEffects(config) end,
+        performanceCountersEnabled = function()
+            return self.perf_counter and self.perf_counter:isEnabled() or false
+        end,
+        setPerformanceCountersEnabled = function(enabled)
+            self:_setPerformanceCountersEnabled(enabled)
+        end,
+        resetPerformanceCounters = function()
+            self:_resetPerformanceCounters()
+        end,
+        getPerformanceReport = function()
+            return self:_getPerformanceReport()
+        end,
+        getPerformanceCounter = function()
+            return self.perf_counter
+        end,
     }
 end
 

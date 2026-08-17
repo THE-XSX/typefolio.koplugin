@@ -5,6 +5,11 @@ local Config = {
 local FOLIO_SCENES = {
     off = true, auto = true, quiet = true, study = true,
     editorial = true, chapter = true,
+    swiss = true, terminal = true, quote = true, ticket = true,
+    cover = true, gallery = true, dossier = true, archive = true,
+    bookpost = true, architecture = true, zen = true,
+    mei = true, lan = true, zhu = true, ju = true,
+    custom = true, random = true,
 }
 
 local AWARENESS_DEFAULTS = {

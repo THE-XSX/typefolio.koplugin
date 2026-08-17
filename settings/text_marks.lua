@@ -62,7 +62,7 @@ function TextMarksSettings.renderModeItems(ctx)
     return items
 end
 
-function TextMarksSettings.thicknessDialog(ctx)
+function TextMarksSettings.thicknessDialog(ctx, touchmenu_instance)
     local tr = ctx.tr
     local T = ctx.T
     local getConfig = ctx.getConfig
@@ -100,6 +100,7 @@ function TextMarksSettings.thicknessDialog(ctx)
                     applyStyle(config)
                     notify(T(tr("Thickness set to %1"), value))
                     UIManager:close(dialog)
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
                 end,
             },
         }},
@@ -130,10 +131,11 @@ function TextMarksSettings.underlineItems(ctx)
             checked_func = function()
                 return getConfig(ui).underline == option.key
             end,
-            callback = function()
+            callback = function(touchmenu_instance)
                 local config = getConfig(ui)
                 config.underline = option.key
                 applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         })
     end
@@ -160,10 +162,11 @@ function TextMarksSettings.strokeItems(ctx)
             keep_menu_open = true,
             radio = true,
             checked_func = function() return getConfig(ui).dash_pattern == option.key end,
-            callback = function()
+            callback = function(touchmenu_instance)
                 local config = getConfig(ui)
                 config.dash_pattern = option.key
                 applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         })
     end
@@ -187,17 +190,18 @@ function TextMarksSettings.thicknessItems(ctx)
             keep_menu_open = true,
             radio = true,
             checked_func = function() return getConfig(ui).line_thickness == preset.value end,
-            callback = function()
+            callback = function(touchmenu_instance)
                 local config = getConfig(ui)
                 config.line_thickness = preset.value
                 applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         })
     end
     table.insert(items, {
         text = tr("Custom thickness…"),
         keep_menu_open = true,
-        callback = function() TextMarksSettings.thicknessDialog(ctx) end,
+        callback = function(touchmenu_instance) TextMarksSettings.thicknessDialog(ctx, touchmenu_instance) end,
     })
     return items
 end

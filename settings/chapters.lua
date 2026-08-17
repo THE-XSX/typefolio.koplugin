@@ -80,6 +80,7 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
                 local char = getChapterBoundary(ctx, boundary, "char") or "★"
                 return T(tr("Custom character: %1"), tostring(char))
             end,
+            keep_menu_open = true,
             enabled_func = function()
                 return getChapterBoundary(ctx, boundary, "enabled") == true
             end,

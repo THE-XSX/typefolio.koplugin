@@ -37,7 +37,15 @@ function TypesettingToolsSettings.showHealthReport(ctx)
     local semantic_index = ctx.getSemanticIndex()
 
     if not semantic_index then return end
-    local report = HealthCheck.run(semantic_index:inspect(), ctx.getConfig(ctx.ui), ctx.ui)
+    local perf = ctx.getPerformanceCounter and ctx.getPerformanceCounter()
+    local report
+    if perf then
+        report = perf:measure("phase.health_check.menu", function()
+            return HealthCheck.run(semantic_index:inspect(), ctx.getConfig(ctx.ui), ctx.ui, perf)
+        end)
+    else
+        report = HealthCheck.run(semantic_index:inspect(), ctx.getConfig(ctx.ui), ctx.ui)
+    end
     local lines = {
         "--------------------------------------------------",
         " ■ " .. T(tr("Typesetting health score: %1/100"), tostring(report.score)),
@@ -114,6 +122,50 @@ function TypesettingToolsSettings.inspectSelector(ctx, y_ratio)
         text_type = "code",
         height = math.floor(Screen:getHeight() * 0.8),
     })
+end
+
+function TypesettingToolsSettings.showPerformanceReport(ctx)
+    local report, path, err = ctx.getPerformanceReport()
+    local text = report
+    if path then
+        text = ctx.T(ctx.tr("Performance report saved to: %1"), path) .. "\n\n" .. report
+    elseif err then
+        text = ctx.T(ctx.tr("Failed to save performance report: %1"), tostring(err)) .. "\n\n" .. report
+    end
+    UIManager:show(TextViewer:new{
+        title = ctx.tr("Performance report"),
+        text = text,
+        text_type = "code",
+        height = math.floor(ctx.Screen:getHeight() * 0.85),
+    })
+end
+
+function TypesettingToolsSettings.performanceCounterItems(ctx)
+    local Device = ctx.Device or require("device")
+    return {
+        {
+            text = ctx.tr("View performance report"),
+            callback = function() TypesettingToolsSettings.showPerformanceReport(ctx) end,
+        },
+        {
+            text = ctx.tr("Copy performance report"),
+            enabled_func = function() return Device:hasClipboard() end,
+            callback = function()
+                local report = ctx.getPerformanceReport()
+                Device.input.setClipboardText(report)
+                ctx.notify(ctx.tr("Performance report copied"))
+            end,
+        },
+        {
+            text = ctx.tr("Reset performance counters"),
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                ctx.resetPerformanceCounters()
+                ctx.notify(ctx.tr("Performance counters reset"))
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        },
+    }
 end
 
 function TypesettingToolsSettings.selectorHelperItems(ctx)
@@ -207,6 +259,7 @@ end
 
 function TypesettingToolsSettings.items(ctx)
     local tr = ctx.tr
+    local T = ctx.T
     return {
         {
             text = tr("Typesetting health check"),
@@ -236,6 +289,20 @@ function TypesettingToolsSettings.items(ctx)
             callback = function(touchmenu_instance)
                 setEmphasisPainter(ctx, "enabled", not getEmphasisPainter(ctx, "enabled"))
                 if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        },
+        {
+            text_func = function()
+                return T(tr("%1: %2"), tr("Developer performance counters"),
+                    ctx.performanceCountersEnabled() and tr("Enabled") or tr("Disabled"))
+            end,
+            checked_func = function() return ctx.performanceCountersEnabled() end,
+            checkmark_callback = function(touchmenu_instance)
+                ctx.setPerformanceCountersEnabled(not ctx.performanceCountersEnabled())
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            sub_item_table_func = function()
+                return TypesettingToolsSettings.performanceCounterItems(ctx)
             end,
         },
     }

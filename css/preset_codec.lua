@@ -145,12 +145,15 @@ local PARAM_RULES = {
         bold = "boolean",
         italic = "boolean",
     },
-    chapter_pagebreak = {},
+    chapter_pagebreak = {
+        include_centered = "boolean",
+    },
     header_border = {
         border = { "both", "bottom", "top", "none" },
         line_style = { "solid", "dashed", "dotted" },
         thickness = { min = 1, max = 5 },
         centered = "boolean",
+        include_centered = "boolean",
     },
     blockquote_box = {
         bar = { min = 0, max = 10 },
@@ -158,7 +161,9 @@ local PARAM_RULES = {
         italic = "boolean",
     },
     drop_caps = {
-        scale = { min = 1.5, max = 3.5 },
+        -- An em multiplier, not a pixel count: the menu spins it in 0.1 steps and the
+        -- template formats it "%.1fem", so whole numbers must not be required here.
+        scale = { min = 1.5, max = 3.5, fractional = true },
         bold = "boolean",
     },
     pure_black = {},
@@ -181,8 +186,20 @@ local function validateParams(config)
             if rule == "boolean" then
                 if type(value) ~= "boolean" then return nil, name .. " must be a boolean" end
             elseif rule.min then
-                if type(value) ~= "number" or value < rule.min or value > rule.max then
+                -- NaN loses every comparison, so test it before the range check rather
+                -- than relying on the whole-number rule below to catch it.
+                if type(value) ~= "number" or value ~= value
+                    or value < rule.min or value > rule.max then
                     return nil, name .. " is out of range"
+                end
+                -- Most numeric parameters here are pixel counts that end up in a "%dpx"
+                -- format. LuaJIT would silently truncate 2.5 to "2px"; Lua 5.3+ raises
+                -- "number has no integer representation" instead. Reject it at the door so
+                -- a hand-edited preset file fails with a clear message on either runtime.
+                -- (2.0 is fine -- it has an exact integer representation.) Rules that carry
+                -- a real fraction, like the drop-cap em multiplier, opt out.
+                if not rule.fractional and value % 1 ~= 0 then
+                    return nil, name .. " must be a whole number"
                 end
             elseif not oneOf(value, rule) then
                 return nil, name .. " has an unsupported value"
@@ -208,7 +225,10 @@ local function validateConfig(value)
         return nil, "dash_pattern must be a string"
     end
     if value.folio_scene ~= nil and not oneOf(value.folio_scene,
-            { "off", "auto", "quiet", "study", "editorial", "chapter" }) then
+            { "off", "auto", "quiet", "study", "editorial", "chapter",
+              "swiss", "terminal", "quote", "ticket", "cover", "gallery",
+              "dossier", "archive", "bookpost", "architecture", "zen",
+              "mei", "lan", "zhu", "ju", "custom", "random" }) then
         return nil, "unsupported folio scene"
     end
     if value.tweaks ~= nil and type(value.tweaks) ~= "table" then

@@ -1,16 +1,22 @@
 local HealthCheck = {}
 
-local function safeCall(fn)
-    local ok, a, b, c = pcall(fn)
+local function safeCall(fn, perf, metric)
+    local ok, a, b, c
+    if perf and metric then
+        ok, a, b, c = perf:safeCall(metric, fn)
+    else
+        ok, a, b, c = pcall(fn)
+    end
     if ok then return a, b, c end
     return nil
 end
 
-local function sampleTOCNodeHTML(ui)
+local function sampleTOCNodeHTML(ui, perf)
     if not (ui and ui.toc) then return {} end
     local toc_list = ui.toc.toc
     if type(toc_list) ~= "table" or #toc_list == 0 then
-        toc_list = safeCall(function() return ui.document:getToc() end)
+        toc_list = safeCall(function() return ui.document:getToc() end,
+            perf, "native.document.getToc.health")
     end
     if type(toc_list) ~= "table" or #toc_list == 0 then return {} end
 
@@ -31,7 +37,7 @@ local function sampleTOCNodeHTML(ui)
         if type(xp) == "string" and xp ~= "" then
             local html = safeCall(function()
                 return document:getHTMLFromXPointer(xp, 0x1001, true)
-            end)
+            end, perf, "native.document.getHTML.health")
             if type(html) == "string" and html ~= "" then
                 table.insert(sampled_html, html)
             end
@@ -40,20 +46,58 @@ local function sampleTOCNodeHTML(ui)
     return sampled_html
 end
 
-function HealthCheck.run(snapshot, config, ui)
+-- U+3000. Chinese EPUBs use it as a leading indent; drop caps then enlarge the space
+-- instead of the first glyph.
+local IDEOGRAPHIC_SPACE = "\227\128\128"
+
+local function startsWithIdeographicSpace(node)
+    local text = type(node.text) == "string" and node.text or ""
+    if text ~= "" then
+        return text:sub(1, #IDEOGRAPHIC_SPACE) == IDEOGRAPHIC_SPACE
+    end
+    local html = type(node.html) == "string" and node.html or ""
+    -- Step over the opening tag and look at the first character of the content.
+    local body = html:gsub("^%s*<[^>]->%s*", "")
+    return body:sub(1, #IDEOGRAPHIC_SPACE) == IDEOGRAPHIC_SPACE
+end
+
+local function looksCentered(html)
+    local lowered = html:lower()
+    return lowered:find('align%s*=%s*"?center') ~= nil
+        or lowered:find("text%-align%s*:%s*center") ~= nil
+end
+
+function HealthCheck.run(snapshot, config, ui, perf)
     snapshot = snapshot or {}
     config = config or {}
     local findings = {}
     local features = {}
 
     local html_snippets = {}
+    -- Nodes worth marking on the page. These are collected during the walk rather than
+    -- recovered from the combined HTML below, because a finding has to hand the painter
+    -- back the very node objects it iterates -- semantic_layout.lua keys problem_nodes on
+    -- node identity, so a copy or an index would not match.
+    local indent_nodes = {}
+    local centered_body_nodes = {}
+    local previous_kind
     for _, node in ipairs(snapshot.nodes or {}) do
         if type(node.html) == "string" and node.html ~= "" then
             table.insert(html_snippets, node.html)
+            if node.kind ~= "heading" and looksCentered(node.html) then
+                table.insert(centered_body_nodes, node)
+            end
         end
+        -- Only the paragraph a drop cap actually lands on, i.e. the one right after a
+        -- heading. Marking every indented paragraph would light up the whole page in a
+        -- typical Chinese book and tell the reader nothing.
+        if previous_kind == "heading" and startsWithIdeographicSpace(node) then
+            table.insert(indent_nodes, node)
+        end
+        previous_kind = node.kind
     end
 
-    local toc_samples = sampleTOCNodeHTML(ui)
+    local toc_samples = sampleTOCNodeHTML(ui, perf)
     for _, html in ipairs(toc_samples) do
         table.insert(html_snippets, html)
     end
@@ -211,6 +255,25 @@ function HealthCheck.run(snapshot, config, ui)
             desc = "'Skip headings and centered text' is currently disabled.",
             action1 = "Plugin setting: Enable 'Skip headings and centered text' in Text Marks menu.",
             action2 = "Calibre edit: Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>",
+        })
+    end
+
+    -- Findings are the localizable half of the report: a warning the reader can be shown
+    -- *where* it applies. Each one is gated on the setting that makes it actionable, so
+    -- "Mark health-check problems" only draws where a setting is actually about to do
+    -- the wrong thing.
+    if config.tweaks and config.tweaks.drop_caps == true and #indent_nodes > 0 then
+        table.insert(findings, {
+            id = "fullwidth_indent",
+            feature = "Drop caps (Newspaper style)",
+            nodes = indent_nodes,
+        })
+    end
+    if config.skip_headings == false and #centered_body_nodes > 0 then
+        table.insert(findings, {
+            id = "centered_body",
+            feature = "Underline & Skip Centered",
+            nodes = centered_body_nodes,
         })
     end
 
