@@ -7,6 +7,7 @@ local ChapterSettings = dofile(SETTINGS_ROOT .. "chapters.lua")
 local TextStylingSettings = dofile(SETTINGS_ROOT .. "text_styling.lua")
 local TypesettingToolsSettings = dofile(SETTINGS_ROOT .. "typesetting_tools.lua")
 local FolioScenesSettings = dofile(SETTINGS_ROOT .. "folio_scenes.lua")
+local CustomHeaderSettings = dofile(SETTINGS_ROOT .. "custom_header.lua")
 local PresetsSettings = dofile(SETTINGS_ROOT .. "presets.lua")
 
 local Settings = {
@@ -14,6 +15,7 @@ local Settings = {
     TextMarks = TextMarksSettings,
     Chapters = ChapterSettings,
     TextStyling = TextStylingSettings,
+    CustomHeader = CustomHeaderSettings,
     TypesettingTools = TypesettingToolsSettings,
     FolioScenes = FolioScenesSettings,
     Presets = PresetsSettings,
@@ -36,6 +38,11 @@ function Settings.menuItems(ctx)
     table.insert(items, {
         text = tr("Text styling"),
         sub_item_table_func = function() return TextStylingSettings.items(ctx) end,
+        separator = true,
+    })
+    table.insert(items, {
+        text = tr("Custom top header"),
+        sub_item_table_func = function() return CustomHeaderSettings.items(ctx) end,
         separator = true,
     })
     table.insert(items, {

@@ -42,6 +42,24 @@ local EMPHASIS_PAINTER_DEFAULTS = {
     gap = 12,
 }
 
+local CUSTOM_HEADER_DEFAULTS = {
+    enabled = false,
+    preset = "modern",
+    left = "chapter_title",
+    center = "none",
+    right = "time_battery",
+    custom_text = "",
+    font_size = 13,
+    font_bold = false,
+    font_italic = false,
+    divider_style = "solid",
+    divider_thickness = 1,
+    divider_custom_char = "✦",
+    top_offset = 12,
+    padding_bottom = 6,
+    hide_on_chapter_start = false,
+}
+
 local UNDERLINE_ALIASES = {
     all_lines_dashed_compat = { underline = "all_lines", dash_pattern = "normal" },
     all_lines_dashed = { underline = "all_lines", dash_pattern = "normal" },
@@ -101,6 +119,7 @@ function Config.defaults()
         semantic_drawing = clone(SEMANTIC_DEFAULTS),
         dialogue_painter = clone(DIALOGUE_PAINTER_DEFAULTS),
         emphasis_painter = clone(EMPHASIS_PAINTER_DEFAULTS),
+        custom_header = clone(CUSTOM_HEADER_DEFAULTS),
         koreader_settings = {},
     }
 end
@@ -218,8 +237,43 @@ function Config.normalize(value)
             }, false),
         }
     end
-    -- Annotation-aware drawing was removed; discard its legacy per-book settings.
-    config.awareness = { chapter = config.awareness.chapter }
+    -- Custom reading header normalization
+    local header_source = type(config.custom_header) == "table"
+        and config.custom_header or {}
+    config.custom_header = {}
+    for key, default in pairs(CUSTOM_HEADER_DEFAULTS) do
+        local val = header_source[key]
+        config.custom_header[key] = val == nil and default or val
+    end
+    local ch = config.custom_header
+    ch.enabled = booleanOr(ch.enabled, false)
+    ch.preset = oneOf(ch.preset, { "minimal", "modern", "classic", "reading", "custom" })
+        and ch.preset or "modern"
+    local valid_slots = {
+        "none", "chapter_title", "book_title", "author", "clock", "battery",
+        "time_battery", "reading_percent", "page_progress", "progress_combo",
+        "pages_left_chapter", "custom_text",
+    }
+    ch.left = oneOf(ch.left, valid_slots) and ch.left or "chapter_title"
+    ch.center = oneOf(ch.center, valid_slots) and ch.center or "none"
+    ch.right = oneOf(ch.right, valid_slots) and ch.right or "time_battery"
+    ch.custom_text = type(ch.custom_text) == "string" and ch.custom_text or ""
+    ch.font_size = (type(ch.font_size) == "number" and ch.font_size >= 9 and ch.font_size <= 28)
+        and ch.font_size or 13
+    ch.font_bold = booleanOr(ch.font_bold, false)
+    ch.font_italic = booleanOr(ch.font_italic, false)
+    ch.divider_style = oneOf(ch.divider_style, {
+        "none", "solid", "dashed", "dots_small", "dots_big",
+        "vertical_bar", "slash", "double_slash", "custom",
+    }) and ch.divider_style or "solid"
+    ch.divider_thickness = thicknessOr(ch.divider_thickness, 1)
+    ch.divider_custom_char = type(ch.divider_custom_char) == "string" and ch.divider_custom_char ~= ""
+        and ch.divider_custom_char or "✦"
+    ch.top_offset = (type(ch.top_offset) == "number" and ch.top_offset >= 0 and ch.top_offset <= 60)
+        and ch.top_offset or 12
+    ch.padding_bottom = (type(ch.padding_bottom) == "number" and ch.padding_bottom >= 0 and ch.padding_bottom <= 30)
+        and ch.padding_bottom or 6
+    ch.hide_on_chapter_start = booleanOr(ch.hide_on_chapter_start, false)
 
     local alias = UNDERLINE_ALIASES[config.underline]
     if alias then

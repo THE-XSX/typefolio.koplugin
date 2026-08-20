@@ -209,12 +209,57 @@ local function validateParams(config)
     return true
 end
 
+local function validateCustomHeader(value)
+    if value == nil then return true end
+    if type(value) ~= "table" then return nil, "custom_header must be an object" end
+    local ok, err = onlyKeys(value, {
+        enabled = true, preset = true, left = true, center = true, right = true,
+        custom_text = true, font_size = true, font_bold = true, font_italic = true,
+        divider_style = true, divider_thickness = true, divider_custom_char = true,
+        top_offset = true, padding_bottom = true, hide_on_chapter_start = true,
+    }, "custom header field")
+    if not ok then return nil, err end
+    if value.enabled ~= nil and type(value.enabled) ~= "boolean" then
+        return nil, "enabled must be a boolean"
+    end
+    if value.preset ~= nil and not oneOf(value.preset, { "minimal", "modern", "classic", "reading", "custom" }) then
+        return nil, "preset has an unsupported value"
+    end
+    local valid_slots = {
+        "none", "chapter_title", "book_title", "author", "clock", "battery",
+        "time_battery", "reading_percent", "page_progress", "progress_combo",
+        "pages_left_chapter", "custom_text",
+    }
+    for _, slot in ipairs({ "left", "center", "right" }) do
+        if value[slot] ~= nil and not oneOf(value[slot], valid_slots) then
+            return nil, slot .. " has an unsupported value"
+        end
+    end
+    if value.divider_style ~= nil and not oneOf(value.divider_style, {
+        "none", "solid", "dashed", "dots_small", "dots_big",
+        "vertical_bar", "slash", "double_slash", "custom",
+    }) then
+        return nil, "divider_style has an unsupported value"
+    end
+    if value.divider_thickness ~= nil and (type(value.divider_thickness) ~= "number"
+            or value.divider_thickness % 1 ~= 0 or value.divider_thickness < 1 or value.divider_thickness > 3) then
+        return nil, "divider_thickness is out of range"
+    end
+    if value.font_size ~= nil and (type(value.font_size) ~= "number"
+            or value.font_size < 8 or value.font_size > 32) then
+        return nil, "font_size is out of range"
+    end
+    return true
+end
+
 local function validateConfig(value)
     if type(value) ~= "table" then return nil, "config must be an object" end
     local awareness_ok, awareness_err = validateAwareness(value.awareness)
     if not awareness_ok then return nil, awareness_err end
     local semantic_ok, semantic_err = validateSemanticDrawing(value.semantic_drawing)
     if not semantic_ok then return nil, semantic_err end
+    local header_ok, header_err = validateCustomHeader(value.custom_header)
+    if not header_ok then return nil, header_err end
     if value.underline ~= nil and type(value.underline) ~= "string" then
         return nil, "underline must be a string"
     end

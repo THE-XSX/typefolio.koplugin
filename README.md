@@ -160,7 +160,7 @@ Automatic mode paints per-line underlines and highlighters while routing paragra
 5. **Folio Scenes** — per-book sleep-screen linkage with Reading Folio 1.5+
 6. **Presets** — built-ins, named layout comparisons, versioned JSON import/export (tap a `.typefolio.json` file to import or delete it)
 
-A saved or exported preset also carries the book's KOReader typesetting settings (font, size, line spacing, margins, view/render mode, zoom dpi, embedded styles and fonts, alt status bar, rotation, per-book stylesheet). Applying it to another book replays each option's own creoptions event, batched into a single refresh. This payload is **one-shot**: it is applied but never stored on the book, so later changes made in the bottom menu are not overwritten the next time the book is opened. Importing a preset file keeps the payload the file was exported with; only "Save current as new preset" captures the book you are reading now.
+A saved or exported preset also carries the book's KOReader typesetting and reading interface settings (font, size, line spacing, margins, view/render mode, zoom dpi, embedded styles and fonts, bottom status bar / footer configuration and custom text, top status bar / header / alt status bar, rotation, per-book stylesheet). Applying it to another book replays each option's own creoptions event, batched into a single refresh. This payload is **one-shot**: it is applied but never stored on the book, so later changes made in the bottom menu are not overwritten the next time the book is opened. Importing a preset file keeps the payload the file was exported with; only "Save current as new preset" captures the book you are reading now.
 
 Built-in presets only flip effect switches (parameters you already tuned are kept):
 
@@ -185,8 +185,18 @@ The generated `styletweaks/99_typefolio.css` is a **single shared file**. Per-bo
 
 ## 更新记录 / Changelog
 
-### 未发布 / Unreleased
+### 2026-08-20 (v3.1.0)
 
+- **自研现代化顶部页眉（自定义顶部状态栏）**：
+  - 彻底越过系统自带的顶部状态栏（启用文笺顶部页眉时自动关闭并抑制 KOReader 自带的 `copt_status_line`，避免双重状态栏杂乱与重叠）。
+  - **三插槽自由定制 (Left / Center / Right)**：支持自由选择 **章节名称**、**书籍标题**、**作者**、**当前时间**、**电池电量**、**时间·电量紧凑组合**、**阅读进度 %**、**页码进度 (X/Y)**、**进度组合 (42% · 45/320)**、**本章剩余页数**、**自定义文本** 等，内置多槽位动态宽度计算与智能防重叠截断（自动添加省略号 `…`）。
+  - **全套精致分割线美学**：支持 **空白 (None)**、**实线 (Solid)**、**虚线 (Dashed)**、**小点 (· · ·)**、**大点 (● ● ●)**、**竖线 (| | |)**、**斜线 (/ / /)**、**双斜线 (// // //)** 及 **自定义符号 / 图案 (如 ✦, ~, ◆ 等)** 与线宽控制。
+  - **丰富排版控制**：内置现代、极简、经典、沉浸阅读快速布局预设，支持字号调整 (9~24pt)、文字加粗、文字斜体、顶部外边距、下内边距及章节起始页自动隐藏。
+  - **全生态联动**：完整支持存入书籍配置、自定义预设、导出分享至 `.typefolio.json` 并在跨书应用时自动重放与即时刷新。
+
+### 2026-08-20 (v3.0.6)
+
+- **将 KOReader 阅读界面自带的页眉页脚（状态栏）纳入预设保存与分享**：保存自定义预设（「保存当前设置为新预设」）及导出预设文件（`.typefolio.json`）时，完整抓取 KOReader 底部状态栏（`ReaderFooter` 的显示项、排序、字体字号、加粗、容器高度、进度条样式/位置/边距、对齐方式及自定义文本等）与顶部状态栏/页眉（`cre_header_*` 标题/作者/时钟/电量/阅读进度/页码/章节标记与状态栏开关）；在跨书应用预设时自动重放并即时刷新底部页脚与顶部页眉。
 - 修复**套用内置预设会悄悄关掉对话与强调绘制器**。预设菜单原本手写一张「需要保留的设置」清单来拼配置表，后来新增的 `dialogue_painter`、`emphasis_painter`、`skip_blockquotes` 没被加进去，于是 `Config.normalize` 把它们填成默认值：点一下「预设：研读笔记」，引号高亮和强调点就没了，而且写进了书籍设置。现在改为从当前配置克隆一份、只覆盖预设真正定义的字段（下划线、虚线样式、特效开关），新增设置从此自动被保留。
 - 修复**导出的预设在别的设备上导不回来**，三个洞：`drop_caps.scale` 是 em 倍数（菜单按 0.1 步进，模板按 `%.1fem` 格式化，出厂默认 2.1），却套用了为像素值写的「必须是整数」规则，21 个可选值有 18 个被拒；`header_border` 的规则表漏了 `include_centered`；`chapter_pagebreak` 的规则表是空的，而菜单同样能写出这个键。导出不做校验、导入才校验，所以这三个洞只会在对面设备上炸。规则里现在可以声明某个数值允许小数，NaN 另设显式判断（`<`/`>` 对 NaN 均为假，原先靠整数规则兜底）。
 - 修复**「标记体检问题」永远什么都不画**：`HealthCheck.run` 建了 `findings` 空表、原样返回，全程没往里放过东西，而 `painters/semantic_layout.lua` 的问题标记正是从它来的——开关是空转的，还白付一次每帧的体检。现在会给出两类可定位的问题：开着首字下沉时，章节标题后那一段若以全角空格开头（下沉的会是空格而不是首字）；关掉「跳过标题与居中段落」时，页面上的居中段落。只标记下沉真正会落到的那一段，否则中文书里满页缩进会被标成一片。

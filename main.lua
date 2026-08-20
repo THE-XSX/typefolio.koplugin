@@ -12,6 +12,7 @@ local HealthCheck = dofile(PLUGIN_ROOT .. "tools/health_check.lua")
 local SelectorHelper = dofile(PLUGIN_ROOT .. "tools/selector_helper.lua")
 local Painter = dofile(PLUGIN_ROOT .. "painters/painter.lua")
 local ContextPainter = dofile(PLUGIN_ROOT .. "painters/context_painter.lua")
+local HeaderPainter = dofile(PLUGIN_ROOT .. "painters/header_painter.lua")
 local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
 local PerfCounter = dofile(PLUGIN_ROOT .. "core/perf_counter.lua")
 local RenderPlanner = dofile(PLUGIN_ROOT .. "core/render_planner.lua")
@@ -98,6 +99,13 @@ local CRE_ALL_OPTION_KEYS = {
     "copt_embedded_css", "copt_embedded_fonts", "copt_smooth_scaling", "copt_nightmode_images", "copt_status_line",
     "font_name", "font_family", "font_face", "style_tweaks",
     "page_overlap", "show_overlap_enable", "page_overlap_style", "header_margins", "show_header",
+    -- Footer / Bottom Status Bar
+    "footer", "reader_footer_mode", "reader_footer_custom_text", "reader_footer_custom_text_repetitions", "footer_visible",
+    -- Header / Top Status Bar / Alt Status Bar
+    "cre_header_title", "cre_header_author", "cre_header_clock", "cre_header_auto_refresh",
+    "cre_header_page_number", "cre_header_page_count", "cre_header_reading_percent",
+    "cre_header_battery", "cre_header_battery_percent", "cre_header_chapter_marks",
+    "header", "header_visible", "alt_status_bar", "progress_margin",
 }
 
 -- Keys a preset may carry that must never be written into a book's doc_settings:
@@ -113,14 +121,20 @@ local function captureKOReaderDocSettings(ui)
 
     if ui.doc_settings and type(ui.doc_settings.settings) == "table" then
         for k, v in pairs(ui.doc_settings.settings) do
-            if k:sub(1, 5) == "copt_" or k == "font_name" or k == "font_family" or k == "font_face"
+            if k:sub(1, 5) == "copt_" or k:sub(1, 11) == "cre_header_"
+                or k == "font_name" or k == "font_family" or k == "font_face"
                 or k == "style_tweaks" or k == "page_overlap" or k == "show_overlap_enable"
-                or k == "header_margins" or k == "show_header" then
+                or k == "page_overlap_style" or k == "header_margins" or k == "show_header"
+                or k == "footer" or k == "reader_footer_mode"
+                or k == "reader_footer_custom_text" or k == "reader_footer_custom_text_repetitions"
+                or k == "footer_visible" or k == "header" or k == "header_visible"
+                or k == "alt_status_bar" or k == "progress_margin" then
                 captured[k] = Config.clone(v)
             end
         end
     end
 
+    local footer_obj = ui.footer or (ui.view and ui.view.footer)
     for _, key in ipairs(CRE_ALL_OPTION_KEYS) do
         if captured[key] == nil then
             local val = nil
@@ -129,6 +143,17 @@ local function captureKOReaderDocSettings(ui)
             end
             if val == nil and ui.doc_settings then
                 val = ui.doc_settings:readSetting(key)
+            end
+            if val == nil and footer_obj then
+                if key == "footer" and type(footer_obj.settings) == "table" then
+                    val = footer_obj.settings
+                elseif key == "reader_footer_mode" and footer_obj.mode ~= nil then
+                    val = footer_obj.mode
+                elseif key == "reader_footer_custom_text" and footer_obj.custom_text ~= nil then
+                    val = footer_obj.custom_text
+                elseif key == "reader_footer_custom_text_repetitions" and footer_obj.custom_text_repetitions ~= nil then
+                    val = footer_obj.custom_text_repetitions
+                end
             end
             if val == nil then
                 val = G_reader_settings:readSetting(key)
@@ -318,6 +343,137 @@ local function restoreKOReaderDocSettings(ui, captured)
         pcall(function() ui.typeset:setStyleSheet(captured.css) end)
     end
 
+    -- Restore KOReader ReaderFooter (bottom status bar)
+    if captured.footer ~= nil or captured.reader_footer_mode ~= nil
+            or captured.reader_footer_custom_text ~= nil
+            or captured.reader_footer_custom_text_repetitions ~= nil then
+        if type(captured.footer) == "table" then
+            G_reader_settings:saveSetting("footer", Config.clone(captured.footer))
+        end
+        if captured.reader_footer_mode ~= nil then
+            G_reader_settings:saveSetting("reader_footer_mode", captured.reader_footer_mode)
+        end
+        if captured.reader_footer_custom_text ~= nil then
+            G_reader_settings:saveSetting("reader_footer_custom_text", captured.reader_footer_custom_text)
+        end
+        if captured.reader_footer_custom_text_repetitions ~= nil then
+            G_reader_settings:saveSetting("reader_footer_custom_text_repetitions", captured.reader_footer_custom_text_repetitions)
+        end
+
+        local footer_obj = ui.footer or (ui.view and ui.view.footer)
+        if footer_obj then
+            if footer_obj.loadPreset then
+                pcall(function()
+                    footer_obj:loadPreset({
+                        footer = Config.clone(captured.footer or footer_obj.settings),
+                        reader_footer_mode = captured.reader_footer_mode or footer_obj.mode,
+                        reader_footer_custom_text = captured.reader_footer_custom_text or footer_obj.custom_text,
+                        reader_footer_custom_text_repetitions = captured.reader_footer_custom_text_repetitions or footer_obj.custom_text_repetitions,
+                    })
+                end)
+            else
+                if type(captured.footer) == "table" then
+                    footer_obj.settings = G_reader_settings:readSetting("footer")
+                end
+                if captured.reader_footer_custom_text ~= nil then
+                    footer_obj.custom_text = captured.reader_footer_custom_text
+                end
+                if captured.reader_footer_custom_text_repetitions ~= nil then
+                    footer_obj.custom_text_repetitions = tonumber(captured.reader_footer_custom_text_repetitions)
+                end
+                pcall(function() if footer_obj.set_mode_index then footer_obj:set_mode_index() end end)
+                pcall(function() if footer_obj.set_has_no_mode then footer_obj:set_has_no_mode() end end)
+                pcall(function() if footer_obj.applyFooterMode and captured.reader_footer_mode ~= nil then footer_obj:applyFooterMode(captured.reader_footer_mode) end end)
+                pcall(function() if footer_obj.updateFooterTextGenerator then footer_obj:updateFooterTextGenerator() end end)
+                pcall(function() if footer_obj.updateFooterFont then footer_obj:updateFooterFont() end end)
+                pcall(function() if footer_obj.setTocMarkers then footer_obj:setTocMarkers() end end)
+                pcall(function() if footer_obj.refreshFooter then footer_obj:refreshFooter(true, true) end end)
+            end
+        end
+        pcall(function() ui:handleEvent(Event:new("RecreateFooter")) end)
+        pcall(function() ui:handleEvent(Event:new("UpdateFooter", true, true)) end)
+        pcall(function() ui:handleEvent(Event:new("UpdateStatusbar")) end)
+    end
+
+    if captured.footer_visible ~= nil then
+        pcall(function() ui:handleEvent(Event:new("ToggleFooter", captured.footer_visible)) end)
+    end
+
+    -- Restore KOReader Crengine Header / Top Status Line / Alt Status Bar
+    local has_cre_header = false
+    local cre_header_keys = {
+        title = "cre_header_title",
+        author = "cre_header_author",
+        clock = "cre_header_clock",
+        auto_refresh = "cre_header_auto_refresh",
+        page_number = "cre_header_page_number",
+        page_count = "cre_header_page_count",
+        reading_percent = "cre_header_reading_percent",
+        battery = "cre_header_battery",
+        battery_percent = "cre_header_battery_percent",
+        chapter_marks = "cre_header_chapter_marks",
+    }
+    for _, k in pairs(cre_header_keys) do
+        if captured[k] ~= nil then
+            has_cre_header = true
+            G_reader_settings:saveSetting(k, captured[k])
+        end
+    end
+
+    if has_cre_header and ui.document and ui.document._document then
+        pcall(function()
+            if captured.cre_header_title ~= nil then
+                ui.document._document:setIntProperty("window.status.title", captured.cre_header_title)
+            end
+            if captured.cre_header_author ~= nil then
+                ui.document._document:setIntProperty("window.status.author", captured.cre_header_author)
+            end
+            if captured.cre_header_clock ~= nil then
+                ui.document._document:setIntProperty("window.status.clock", captured.cre_header_clock)
+            end
+            if captured.cre_header_page_number ~= nil then
+                ui.document._document:setIntProperty("window.status.pos.page.number", captured.cre_header_page_number)
+            end
+            if captured.cre_header_page_count ~= nil then
+                ui.document._document:setIntProperty("window.status.pos.page.count", captured.cre_header_page_count)
+            end
+            if captured.cre_header_chapter_marks ~= nil then
+                ui.document._document:setIntProperty("crengine.page.header.chapter.marks", captured.cre_header_chapter_marks)
+            end
+            if captured.cre_header_battery ~= nil then
+                ui.document._document:setIntProperty("window.status.battery", captured.cre_header_battery)
+            end
+            if captured.cre_header_battery_percent ~= nil then
+                ui.document._document:setIntProperty("window.status.battery.percent", captured.cre_header_battery_percent)
+            end
+            if captured.cre_header_reading_percent ~= nil then
+                ui.document._document:setIntProperty("window.status.pos.percent", captured.cre_header_reading_percent)
+            end
+        end)
+    end
+
+    if has_cre_header then
+        if ui.coptlistener then
+            pcall(function()
+                if ui.coptlistener.onTimeFormatChanged then ui.coptlistener:onTimeFormatChanged() end
+                if ui.coptlistener.updateHeader then ui.coptlistener:updateHeader() end
+            end)
+        end
+        pcall(function() ui:handleEvent(Event:new("UpdateHeader")) end)
+        pcall(function() ui:handleEvent(Event:new("RecreateHeader")) end)
+    end
+
+    if captured.alt_status_bar ~= nil then
+        G_reader_settings:saveSetting("alt_status_bar", captured.alt_status_bar)
+        pcall(function() ui:handleEvent(Event:new("SetAltStatusbar", captured.alt_status_bar)) end)
+    end
+
+    if captured.header ~= nil or captured.header_visible ~= nil then
+        pcall(function() ui:handleEvent(Event:new("SetHeader", captured.header)) end)
+        pcall(function() ui:handleEvent(Event:new("RecreateHeader")) end)
+        pcall(function() ui:handleEvent(Event:new("UpdateHeader")) end)
+    end
+
     Notification:resetNotifySource()
     UIManager:setSilentMode(false)
     UIManager:broadcastEvent(Event:new("BatchedUpdateDone"))
@@ -413,6 +569,22 @@ local function applyStyle(self, config, opts)
         end)
     else
         result = self.engine:apply(config, { persist = persist })
+    end
+    if self.header_painter then self.header_painter:setConfig(result.config) end
+    if result.config and result.config.custom_header and result.config.custom_header.enabled == true then
+        if self.ui and self.ui.document and self.ui.document.configurable then
+            if self.ui.document.configurable.status_line == 0 then
+                self.ui.document.configurable.status_line = 1
+                if self.ui.doc_settings then
+                    self.ui.doc_settings:saveSetting("copt_status_line", 1)
+                end
+                pcall(function()
+                    local Event = require("ui/event")
+                    self.ui:handleEvent(Event:new("ConfigChange", "status_line", 1))
+                    self.ui:handleEvent(Event:new("SetStatusLine", 1))
+                end)
+            end
+        end
     end
     FolioScene.publish(self.ui, result.config, persist)
     self.last_apply = result
@@ -585,6 +757,7 @@ function TypeFolio:_initEngine()
                 self.painter:setConfig(config)
             end
             if self.context_painter then self.context_painter:setConfig(config) end
+            if self.header_painter then self.header_painter:setConfig(config) end
             if self.book_context then self.book_context:invalidate("config_apply") end
         end,
         refresh = function()
@@ -659,8 +832,13 @@ function TypeFolio:onReaderReady()
         semantic_index = self.semantic_index,
         perf = self.perf_counter,
     }
+    self.header_painter = HeaderPainter:new{
+        context = self.book_context,
+        perf = self.perf_counter,
+    }
     self.view:registerViewModule("typefolio_painter", self.painter)
     self.view:registerViewModule("typefolio_context_painter", self.context_painter)
+    self.view:registerViewModule("typefolio_header_painter", self.header_painter)
     local backup = self.ui.doc_settings:readSetting(LEGACY_EXPERIMENT_BACKUP_KEY)
     if type(backup) == "table" then
         self.ui.doc_settings:saveSetting(CONFIG_KEY, Config.normalize(backup))
@@ -674,6 +852,7 @@ function TypeFolio:_invalidatePainter(reason)
     if self.perf_counter then self.perf_counter:mark("event." .. reason) end
     if self.book_context then self.book_context:invalidate(reason) end
     if self.semantic_index then self.semantic_index:invalidate(reason) end
+    if self.header_painter then self.header_painter:invalidate(reason) end
 end
 
 function TypeFolio:onPageUpdate() self:_invalidatePainter("page_update") end
