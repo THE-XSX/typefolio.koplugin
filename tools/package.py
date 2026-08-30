@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Typefolio (文笺) - KOReader plugin
+# Released under the GNU Affero General Public License v3.0 or later.
+# See the LICENSE file in the project root for the full license text.
+
 """Build the installable KOReader plugin ZIP.
 
 KOReader plugins are installed by unzipping into `koreader/plugins/`, so the archive
@@ -54,11 +61,12 @@ def collect(root):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS)
         for name in sorted(filenames):
-            if name in EXCLUDE_NAMES or name.endswith(EXCLUDE_SUFFIXES):
+            if name in EXCLUDE_NAMES or name.endswith(EXCLUDE_SUFFIXES) or name.startswith(".fuse_hidden"):
                 continue
             abs_path = os.path.join(dirpath, name)
             found.append(os.path.relpath(abs_path, root).replace(os.sep, "/"))
     return found
+
 
 
 def meta_version(root):
@@ -110,8 +118,9 @@ def verify(archive, prefix, files):
         if hit:
             problems.append("excluded directory %s present: %s" % (sorted(hit)[0], name))
         leaf = segments[-1] if segments else ""
-        if leaf in EXCLUDE_NAMES or (leaf and leaf.endswith(EXCLUDE_SUFFIXES)):
+        if leaf in EXCLUDE_NAMES or (leaf and leaf.endswith(EXCLUDE_SUFFIXES)) or leaf.startswith(".fuse_hidden"):
             problems.append("excluded file present: %s" % name)
+
 
     for required in REQUIRED:
         if prefix + required not in names:

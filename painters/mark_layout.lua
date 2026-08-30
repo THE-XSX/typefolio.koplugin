@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 local MarkLayout = {}
 
 local function addRect(rects, x, y, w, h, screen)

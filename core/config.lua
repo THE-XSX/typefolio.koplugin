@@ -1,5 +1,74 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 local Config = {
     SCHEMA_VERSION = 8,
+}
+
+-- Status bar (custom header / custom footer) vocabularies.
+-- SINGLE SOURCE OF TRUTH. Config.normalize, css/preset_codec.lua,
+-- settings/custom_header.lua, settings/custom_footer.lua and
+-- painters/status_bar_helper.lua all derive from these lists; never re-list an id
+-- anywhere else. Order is menu order. tests/status_bar_spec.lua pins the parity, so a
+-- new id added here fails the suite until the painter and both menus know it too.
+Config.STATUS_SLOTS = {
+    "none", "chapter_title", "book_title", "author", "clock", "clock_12h", "battery",
+    "time_battery", "battery_time", "reading_percent", "page_progress", "page_progress_cn",
+    "progress_combo", "progress_combo_cn", "pages_left_chapter", "time_left_chapter",
+    "time_left_book", "time_left_book_pages", "book_title_page_progress_cn", "custom_text",
+}
+Config.STATUS_PRESETS = {
+    "minimal", "modern", "classic", "reading",
+    "wechat_duokan", "classic_folio", "kobo_split", "ireader", "hanvon", "boox",
+    "wechat_reading", "minimal_pages", "modern_full", "custom",
+}
+Config.STATUS_DIVIDERS = {
+    "none", "solid", "dashed", "dots_small", "dots_big",
+    "vertical_bar", "slash", "double_slash", "progress_bar", "custom",
+}
+-- One font-size range for both bars, shared with the importer and the spin widgets.
+Config.STATUS_FONT_MIN = 8
+Config.STATUS_FONT_MAX = 28
+-- Divider thickness is in unscaled units (paintBar runs it through Screen:scaleBySize),
+-- so 3 is already a heavy rule on a 300 DPI screen. The spin row and the importer read
+-- this instead of writing a literal; a spin row that went one higher than normalize
+-- accepted is exactly how "pick the thickest divider, get the thinnest" happened.
+Config.STATUS_DIVIDER_THICKNESS_MAX = 3
+
+-- The other two numeric bounds the status bar menus offer: distance from the screen edge
+-- to the text, and from the text to the divider. Same reason they live here -- normalize()
+-- resets an out-of-range value to the default, so a spin row whose max exceeds the bound
+-- silently discards the reader's choice.
+Config.STATUS_OFFSET_MAX = 60
+Config.STATUS_PADDING_MAX = 30
+
+-- How far a dialogue mark may keep off the top and bottom of the line box, in unscaled
+-- units (the painter runs it through Screen:scaleBySize like every other px setting here).
+-- 8 is past useful on any sane line height -- the painter also clamps to 40% of the actual
+-- box, so a large value on a short line cannot collapse the mark -- but the spin row has to
+-- stop somewhere, and it has to stop where normalize() stops or the reader's pick is
+-- silently discarded. That is the divider-thickness bug; see the note above it.
+Config.DIALOGUE_INSET_MAX = 8
+
+-- Slot and divider ids that older versions persisted. normalize() translates these
+-- before validating, so a config saved by an earlier build keeps the layout the reader
+-- chose instead of being reset to the defaults -- and an exported preset from that build
+-- still imports. painters/status_bar_helper.lua reads these tables rather than keeping
+-- its own copy.
+Config.STATUS_SLOT_ALIASES = {
+    chapter = "chapter_title",
+    clock_battery = "time_battery",
+    progress_percent = "reading_percent",
+    pages_left_in_chapter = "pages_left_chapter",
+}
+Config.STATUS_DIVIDER_ALIASES = {
+    bars = "vertical_bar",
+    slashes = "slash",
+    double_slashes = "double_slash",
 }
 
 local FOLIO_SCENES = {
@@ -34,6 +103,7 @@ local DIALOGUE_PAINTER_DEFAULTS = {
     lang = "all",
     thickness = 1,
     tint_level = "light",
+    vertical_inset = 0,
 }
 
 local EMPHASIS_PAINTER_DEFAULTS = {
@@ -51,13 +121,45 @@ local CUSTOM_HEADER_DEFAULTS = {
     custom_text = "",
     font_size = 13,
     font_bold = false,
-    font_italic = false,
     divider_style = "solid",
+    divider_position = "auto",
     divider_thickness = 1,
     divider_custom_char = "✦",
     top_offset = 12,
     padding_bottom = 6,
     hide_on_chapter_start = false,
+    -- Only read when divider_style == "progress_bar"; kept here so the header and the
+    -- footer accept the same keys (normalize() drops anything not defaulted).
+    chapter_ticks = true,
+    facing_pages = false,
+    margin_inset = true,
+    -- font_italic is accepted and persisted for older saved settings, but nothing
+    -- renders it: KOReader's TextWidget has no italic field, so the painter cannot
+    -- honour it. Do not add a menu row for it.
+    font_italic = false,
+}
+
+local CUSTOM_FOOTER_DEFAULTS = {
+    enabled = false,
+    preset = "wechat_duokan",
+    left = "time_left_chapter",
+    center = "none",
+    right = "reading_percent",
+    custom_text = "",
+    font_size = 12,
+    font_bold = false,
+    divider_style = "none",
+    divider_position = "auto",
+    divider_thickness = 1,
+    divider_custom_char = "✦",
+    bottom_offset = 12,
+    padding_top = 6,
+    hide_on_chapter_start = false,
+    chapter_ticks = true,
+    facing_pages = false,
+    margin_inset = true,
+    -- See the note in CUSTOM_HEADER_DEFAULTS: persisted, never rendered.
+    font_italic = false,
 }
 
 local UNDERLINE_ALIASES = {
@@ -104,6 +206,22 @@ local function boundaryThicknessOr(value, default)
         and value or default
 end
 
+-- A status bar divider thickness above the range is clamped, not reset: a reader who
+-- picked the thickest rule from a build whose spin row went one too far should get the
+-- thickest one that exists, not the thinnest.
+local function dividerThicknessOr(value, default)
+    if type(value) ~= "number" or value % 1 ~= 0 or value < 1 then return default end
+    return math.min(value, Config.STATUS_DIVIDER_THICKNESS_MAX)
+end
+
+-- Legacy id -> current id, for a value that is about to be validated against one of the
+-- Config.STATUS_* vocabularies. An unknown value is returned untouched so the caller's
+-- own oneOf() check still decides.
+local function canonical(value, aliases)
+    if type(value) ~= "string" then return value end
+    return aliases[value] or value
+end
+
 function Config.defaults()
     return {
         schema_version = Config.SCHEMA_VERSION,
@@ -120,6 +238,7 @@ function Config.defaults()
         dialogue_painter = clone(DIALOGUE_PAINTER_DEFAULTS),
         emphasis_painter = clone(EMPHASIS_PAINTER_DEFAULTS),
         custom_header = clone(CUSTOM_HEADER_DEFAULTS),
+        custom_footer = clone(CUSTOM_FOOTER_DEFAULTS),
         koreader_settings = {},
     }
 end
@@ -187,6 +306,12 @@ function Config.normalize(value)
     dp.thickness = thicknessOr(dp.thickness, 1)
     dp.tint_level = oneOf(dp.tint_level, { "light", "medium", "strong" })
         and dp.tint_level or "light"
+    -- Clamped rather than reset, for the reason spelled out at dividerThicknessOr: a value
+    -- saved by a build whose spin row went higher should give the largest inset that exists,
+    -- not snap back to zero and look like the setting was ignored.
+    dp.vertical_inset = (type(dp.vertical_inset) == "number" and dp.vertical_inset % 1 == 0
+        and dp.vertical_inset >= 0)
+        and math.min(dp.vertical_inset, Config.DIALOGUE_INSET_MAX) or 0
 
     local ep_source = type(config.emphasis_painter) == "table"
         and config.emphasis_painter or {}
@@ -237,6 +362,11 @@ function Config.normalize(value)
             }, false),
         }
     end
+
+    local valid_slots = Config.STATUS_SLOTS
+    local valid_presets = Config.STATUS_PRESETS
+    local valid_dividers = Config.STATUS_DIVIDERS
+
     -- Custom reading header normalization
     local header_source = type(config.custom_header) == "table"
         and config.custom_header or {}
@@ -247,33 +377,83 @@ function Config.normalize(value)
     end
     local ch = config.custom_header
     ch.enabled = booleanOr(ch.enabled, false)
-    ch.preset = oneOf(ch.preset, { "minimal", "modern", "classic", "reading", "custom" })
-        and ch.preset or "modern"
-    local valid_slots = {
-        "none", "chapter_title", "book_title", "author", "clock", "battery",
-        "time_battery", "reading_percent", "page_progress", "progress_combo",
-        "pages_left_chapter", "custom_text",
-    }
+    ch.preset = oneOf(ch.preset, valid_presets) and ch.preset or "modern"
+    ch.left = canonical(ch.left, Config.STATUS_SLOT_ALIASES)
+    ch.center = canonical(ch.center, Config.STATUS_SLOT_ALIASES)
+    ch.right = canonical(ch.right, Config.STATUS_SLOT_ALIASES)
     ch.left = oneOf(ch.left, valid_slots) and ch.left or "chapter_title"
     ch.center = oneOf(ch.center, valid_slots) and ch.center or "none"
     ch.right = oneOf(ch.right, valid_slots) and ch.right or "time_battery"
     ch.custom_text = type(ch.custom_text) == "string" and ch.custom_text or ""
-    ch.font_size = (type(ch.font_size) == "number" and ch.font_size >= 9 and ch.font_size <= 28)
+    ch.font_size = (type(ch.font_size) == "number"
+        and ch.font_size >= Config.STATUS_FONT_MIN and ch.font_size <= Config.STATUS_FONT_MAX)
         and ch.font_size or 13
     ch.font_bold = booleanOr(ch.font_bold, false)
     ch.font_italic = booleanOr(ch.font_italic, false)
-    ch.divider_style = oneOf(ch.divider_style, {
-        "none", "solid", "dashed", "dots_small", "dots_big",
-        "vertical_bar", "slash", "double_slash", "custom",
-    }) and ch.divider_style or "solid"
-    ch.divider_thickness = thicknessOr(ch.divider_thickness, 1)
+    ch.divider_style = canonical(ch.divider_style, Config.STATUS_DIVIDER_ALIASES)
+    ch.divider_style = oneOf(ch.divider_style, valid_dividers) and ch.divider_style or "solid"
+    ch.divider_position = oneOf(ch.divider_position, { "auto", "above", "below" })
+        and ch.divider_position or "auto"
+    ch.divider_thickness = dividerThicknessOr(ch.divider_thickness, 1)
     ch.divider_custom_char = type(ch.divider_custom_char) == "string" and ch.divider_custom_char ~= ""
         and ch.divider_custom_char or "✦"
-    ch.top_offset = (type(ch.top_offset) == "number" and ch.top_offset >= 0 and ch.top_offset <= 60)
+    ch.top_offset = (type(ch.top_offset) == "number" and ch.top_offset >= 0
+        and ch.top_offset <= Config.STATUS_OFFSET_MAX)
         and ch.top_offset or 12
-    ch.padding_bottom = (type(ch.padding_bottom) == "number" and ch.padding_bottom >= 0 and ch.padding_bottom <= 30)
+    ch.padding_bottom = (type(ch.padding_bottom) == "number" and ch.padding_bottom >= 0
+        and ch.padding_bottom <= Config.STATUS_PADDING_MAX)
         and ch.padding_bottom or 6
     ch.hide_on_chapter_start = booleanOr(ch.hide_on_chapter_start, false)
+    ch.chapter_ticks = booleanOr(ch.chapter_ticks, true)
+    ch.facing_pages = booleanOr(ch.facing_pages, false)
+    ch.margin_inset = booleanOr(ch.margin_inset, true)
+
+    -- Custom reading footer normalization
+    local footer_source = type(config.custom_footer) == "table"
+        and config.custom_footer or {}
+    config.custom_footer = {}
+    for key, default in pairs(CUSTOM_FOOTER_DEFAULTS) do
+        local val = footer_source[key]
+        config.custom_footer[key] = val == nil and default or val
+    end
+    local cf = config.custom_footer
+    cf.enabled = booleanOr(cf.enabled, false)
+    cf.preset = oneOf(cf.preset, valid_presets) and cf.preset or "wechat_duokan"
+    cf.left = canonical(cf.left, Config.STATUS_SLOT_ALIASES)
+    cf.center = canonical(cf.center, Config.STATUS_SLOT_ALIASES)
+    cf.right = canonical(cf.right, Config.STATUS_SLOT_ALIASES)
+    cf.left = oneOf(cf.left, valid_slots) and cf.left or "time_left_chapter"
+    cf.center = oneOf(cf.center, valid_slots) and cf.center or "none"
+    cf.right = oneOf(cf.right, valid_slots) and cf.right or "reading_percent"
+    cf.custom_text = type(cf.custom_text) == "string" and cf.custom_text or ""
+    cf.font_size = (type(cf.font_size) == "number"
+        and cf.font_size >= Config.STATUS_FONT_MIN and cf.font_size <= Config.STATUS_FONT_MAX)
+        and cf.font_size or 12
+    cf.font_bold = booleanOr(cf.font_bold, false)
+    cf.font_italic = booleanOr(cf.font_italic, false)
+    cf.divider_style = canonical(cf.divider_style, Config.STATUS_DIVIDER_ALIASES)
+    cf.divider_style = oneOf(cf.divider_style, valid_dividers) and cf.divider_style or "none"
+    cf.divider_position = oneOf(cf.divider_position, { "auto", "above", "below" })
+        and cf.divider_position or "auto"
+    -- Kobo's native footer places its progress track below the centered book/page
+    -- label. Apply this to older saved configs too, which predate divider_position.
+    if cf.preset == "classic_folio" and cf.divider_style == "progress_bar"
+            and cf.divider_position == "auto" then
+        cf.divider_position = "below"
+    end
+    cf.divider_thickness = dividerThicknessOr(cf.divider_thickness, 1)
+    cf.divider_custom_char = type(cf.divider_custom_char) == "string" and cf.divider_custom_char ~= ""
+        and cf.divider_custom_char or "✦"
+    cf.bottom_offset = (type(cf.bottom_offset) == "number" and cf.bottom_offset >= 0
+        and cf.bottom_offset <= Config.STATUS_OFFSET_MAX)
+        and cf.bottom_offset or 12
+    cf.padding_top = (type(cf.padding_top) == "number" and cf.padding_top >= 0
+        and cf.padding_top <= Config.STATUS_PADDING_MAX)
+        and cf.padding_top or 6
+    cf.hide_on_chapter_start = booleanOr(cf.hide_on_chapter_start, false)
+    cf.chapter_ticks = booleanOr(cf.chapter_ticks, true)
+    cf.facing_pages = booleanOr(cf.facing_pages, false)
+    cf.margin_inset = booleanOr(cf.margin_inset, true)
 
     local alias = UNDERLINE_ALIASES[config.underline]
     if alias then

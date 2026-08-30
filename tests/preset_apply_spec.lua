@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- Applying a built-in preset must not quietly undo settings the preset says nothing
 -- about.
 --
@@ -58,6 +65,14 @@ local function readerConfig()
         semantic_drawing = { enabled = true, diagnostics = true, thickness = 2 },
         dialogue_painter = { enabled = true, mode = "underline", tint_level = "strong" },
         emphasis_painter = { enabled = true },
+        -- Slot keys are left/center/right and the divider is divider_style; see
+        -- CUSTOM_HEADER_DEFAULTS. The values have to be real ids from
+        -- Config.STATUS_SLOTS, because normalize() replaces anything else with the
+        -- default -- which is how this spec used to pass its own bad keys silently.
+        custom_header = { enabled = true, preset = "classic_folio",
+            center = "chapter_title", divider_style = "dots_small" },
+        custom_footer = { enabled = true, preset = "wechat_duokan",
+            left = "time_left_chapter", right = "reading_percent" },
     }
 end
 
@@ -88,13 +103,30 @@ local function applyPreset(preset_key)
     error("preset_apply_spec: no menu row matched " .. preset_key, 0)
 end
 
--- Every built-in preset, so a new one cannot be added with the old hand-written table.
+-- The three old built-in presets were unclear and are intentionally gone. Keep the
+-- extension table empty so they cannot drift back into the menu unnoticed.
 local preset_keys = {}
 for key, preset in pairs(CSSTemplates.presets) do
     table.insert(preset_keys, { key = key, name = preset.name })
 end
 table.sort(preset_keys, function(a, b) return a.key < b.key end)
-check("there is at least one built-in preset to check", #preset_keys > 0)
+check("there are no built-in typesetting presets", #preset_keys == 0)
+
+do
+    local ctx = {
+        tr = function(s) return s end,
+        T = function(fmt, ...) return fmt end,
+        ui = { doc_settings = {} },
+        getConfig = function() return readerConfig() end,
+        applyStyle = function() end,
+        notify = function() end,
+    }
+    local labels = {}
+    for _, item in ipairs(PresetsSettings.items(ctx)) do labels[item.text] = true end
+    check("All-line dashes is absent from the preset menu", not labels["Preset: All-line dashes"])
+    check("Study notes is absent from the preset menu", not labels["Preset: Study notes"])
+    check("Vintage newspaper is absent from the preset menu", not labels["Preset: Vintage newspaper"])
+end
 
 for _, entry in ipairs(preset_keys) do
     local applied, current = applyPreset(entry.name)
@@ -122,6 +154,16 @@ for _, entry in ipairs(preset_keys) do
     check(label .. ": line thickness survives", applied.line_thickness == "2px")
     check(label .. ": tweak params survive",
         applied.tweak_params.drop_caps ~= nil and applied.tweak_params.drop_caps.scale == 2.7)
+    check(label .. ": custom_header survives",
+        applied.custom_header.enabled == true
+            and applied.custom_header.preset == "classic_folio"
+            and applied.custom_header.center == "chapter_title"
+            and applied.custom_header.divider_style == "dots_small")
+    check(label .. ": custom_footer survives",
+        applied.custom_footer.enabled == true
+            and applied.custom_footer.preset == "wechat_duokan"
+            and applied.custom_footer.left == "time_left_chapter"
+            and applied.custom_footer.right == "reading_percent")
 
     -- And the preset still does its job.
     local preset = CSSTemplates.presets[entry.key]
@@ -143,6 +185,41 @@ for _, entry in ipairs(preset_keys) do
     -- A preset is a styling payload, never a KOReader-settings replay.
     check(label .. ": no KOReader settings payload rides along",
         type(applied.koreader_settings) == "table" and next(applied.koreader_settings) == nil)
+end
+
+-- "Restore default typesetting" is the same row shape and had the same bug, one menu
+-- entry further down: it handed applyStyle a five-key literal. normalize fills every
+-- absent section from the defaults, so the row also switched off both status bars, the
+-- folio scene and all three painters -- while the notification promised only that the
+-- typesetting tweaks had been reset.
+do
+    local applied, current = applyPreset("Restore default typesetting")
+    check("restore: underline is reset", applied.underline == "none")
+    check("restore: line thickness is reset", applied.line_thickness == "1.5px")
+    check("restore: dash pattern is reset", applied.dash_pattern == "normal")
+    check("restore: tweaks are cleared", next(applied.tweaks) == nil)
+    check("restore: tweak params are cleared", next(applied.tweak_params) == nil)
+    check("restore: no KOReader settings payload rides along",
+        type(applied.koreader_settings) == "table" and next(applied.koreader_settings) == nil)
+    -- Everything the row does not name has to survive it.
+    check("restore: the header stays as the reader left it",
+        applied.custom_header.enabled == true
+            and applied.custom_header.preset == current.custom_header.preset
+            and applied.custom_header.center == current.custom_header.center
+            and applied.custom_header.divider_style == current.custom_header.divider_style)
+    check("restore: the footer stays as the reader left it",
+        applied.custom_footer.enabled == true
+            and applied.custom_footer.left == current.custom_footer.left
+            and applied.custom_footer.right == current.custom_footer.right)
+    check("restore: the folio scene survives", applied.folio_scene == current.folio_scene)
+    check("restore: the dialogue painter survives",
+        applied.dialogue_painter.enabled == true
+            and applied.dialogue_painter.mode == "underline")
+    check("restore: the emphasis painter survives", applied.emphasis_painter.enabled == true)
+    check("restore: semantic drawing survives", applied.semantic_drawing.enabled == true)
+    check("restore: awareness survives", applied.awareness.chapter.start.enabled == true)
+    check("restore: skip_headings survives", applied.skip_headings == false)
+    check("restore: skip_blockquotes survives", applied.skip_blockquotes == false)
 end
 
 print(string.format("preset_apply_spec: %s (%d checks, %d failures)",

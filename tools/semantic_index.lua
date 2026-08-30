@@ -1,3 +1,16 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)tools[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local TextNodes = dofile(PLUGIN_ROOT .. "core/text_nodes.lua")
+
 local SemanticIndex = {}
 SemanticIndex.__index = SemanticIndex
 
@@ -5,48 +18,11 @@ local HEADING_TAGS = { h1 = true, h2 = true, h3 = true, h4 = true, h5 = true, h6
 local SEMANTIC_TAGS = { blockquote = true, hr = true, q = true }
 for tag in pairs(HEADING_TAGS) do SEMANTIC_TAGS[tag] = true end
 
-local function decodeEntities(value)
-    if type(value) ~= "string" or value == "" or not value:find("&", 1, true) then
-        return value or ""
-    end
-    local text = value
-    if text:find("&#x", 1, true) then
-        text = text:gsub("&#x(%x+);", function(hex)
-            local code = tonumber(hex, 16)
-            if not code then return "" end
-            if code < 0x80 then
-                return string.char(code)
-            elseif code < 0x800 then
-                return string.char(0xC0 + math.floor(code / 0x40), 0x80 + (code % 0x40))
-            elseif code < 0x10000 then
-                return string.char(
-                    0xE0 + math.floor(code / 0x1000),
-                    0x80 + math.floor((code % 0x1000) / 0x40),
-                    0x80 + (code % 0x40))
-            end
-            return ""
-        end)
-    end
-    if text:find("&#", 1, true) then
-        text = text:gsub("&#(%d+);", function(dec)
-            local code = tonumber(dec, 10)
-            if not code then return "" end
-            if code < 0x80 then
-                return string.char(code)
-            elseif code < 0x800 then
-                return string.char(0xC0 + math.floor(code / 0x40), 0x80 + (code % 0x40))
-            elseif code < 0x10000 then
-                return string.char(
-                    0xE0 + math.floor(code / 0x1000),
-                    0x80 + math.floor((code % 0x1000) / 0x40),
-                    0x80 + (code % 0x40))
-            end
-            return ""
-        end)
-    end
-    return (text:gsub("&quot;", '"'):gsub("&apos;", "'")
-        :gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&amp;", "&"))
-end
+-- Both live in core/text_nodes.lua. `node.text` and the per-text-node offsets that address
+-- runs inside it have to be measured by the same code, or a mark lands beside the words it
+-- belongs to; two copies of this normalization is exactly how that happens.
+local decodeEntities = TextNodes.decodeEntities
+local textFromHTML = TextNodes.normalize
 
 local function attributesFromHTML(html, preferred_tag)
     if type(html) ~= "string" then return nil, nil, {} end
@@ -110,29 +86,6 @@ local function semanticKind(tag, classes)
         end
     end
     return "body"
-end
-
-local function textFromHTML(html)
-    if type(html) ~= "string" or html == "" then return "" end
-    local stripped = html
-    if stripped:find("<", 1, true) then
-        stripped = stripped:gsub("<%s*[sS][cC][rR][iI][pP][tT].-<%s*/%s*[sS][cC][rR][iI][pP][tT]%s*>", " ")
-            :gsub("<%s*[sS][tT][yY][lL][eE].-<%s*/%s*[sS][tT][yY][lL][eE]%s*>", " ")
-            :gsub("<[^>]*>", "")
-    end
-    stripped = decodeEntities(stripped)
-    if stripped:find("&nbsp;", 1, true) then
-        stripped = stripped:gsub("&nbsp;", " ")
-    end
-    -- 0x1001 HTML includes soft hyphens where creengine may break; they are not
-    -- part of the visible utterance and must not shift quote offsets.
-    if stripped:find("\194\173", 1, true) then
-        stripped = stripped:gsub("\194\173", "") -- U+00AD as UTF-8
-    end
-    if stripped:find("\239\187\191", 1, true) then
-        stripped = stripped:gsub("\239\187\191", "") -- UTF-8 BOM
-    end
-    return (stripped:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
 local function normalizeSample(sample, index)

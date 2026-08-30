@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- settings/text_marks.lua
 -- Text marks settings: underlines, strokes, thickness, and render policy
 local InputDialog = require("ui/widget/inputdialog")
@@ -93,8 +100,12 @@ function TextMarksSettings.thicknessDialog(ctx, touchmenu_instance)
                         return
                     end
                     if num > 20 then num = 20 end
+                    -- One decimal for whole numbers, so a hand-typed 2 spells itself
+                    -- "2.0px" and lights up the 2.0px radio row above instead of
+                    -- storing an equivalent-but-unlisted "2px" that leaves every row
+                    -- unchecked.
                     local value = (num == math.floor(num))
-                        and (string.format("%d", num) .. "px")
+                        and (string.format("%.1f", num) .. "px")
                         or (string.format("%.2f", num):gsub("0+$", ""):gsub("%.$", "") .. "px")
                     config.line_thickness = value
                     applyStyle(config)

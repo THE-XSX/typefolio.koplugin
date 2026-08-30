@@ -1,3 +1,16 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)core[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local TextNodes = dofile(PLUGIN_ROOT .. "core/text_nodes.lua")
+
 local BookContext = {}
 BookContext.__index = BookContext
 
@@ -46,6 +59,11 @@ end
 local function elementPath(xpointer)
     return xpointer:match("^(.*)%.%d+$") or xpointer
 end
+
+-- The block element a pointer sits in, the pointer's path relative to it, and the block's
+-- tag. Lives in core/text_nodes.lua next to the segment parser that consumes it; this is the
+-- right key for anything counted per paragraph, where `elementPath` stops at the text node.
+local blockPath = TextNodes.blockPath
 
 local function isOrderedRange(document, xp0, xp1, perf)
     if not (xp0 and xp1) then return false end
@@ -599,7 +617,7 @@ function BookContext:_semantics(profile)
             -- Parent paragraph key (e.g. /body/DocFragment/body/p[5])
             -- from_final_parent=true returns the parent paragraph markup, so lines in the same
             -- paragraph share the exact same returned html.
-            local base_xp = elementPath(xpointer)
+            local base_xp = blockPath(xpointer) or elementPath(xpointer)
             if html_cache[base_xp] ~= nil then
                 html = html_cache[base_xp]
                 if html then html_available = true end
@@ -654,44 +672,119 @@ end
 -- Number of UTF-8 codepoints in the first `bytes` bytes of `text`. Offsets in
 -- an xpointer count characters, but Lua patterns hand back byte positions, so
 -- every range has to be converted before it can be spliced into a pointer.
-local function charCount(text, bytes)
-    if type(text) ~= "string" then return 0 end
-    local count = 0
-    local i = 1
-    while i <= bytes and i <= #text do
-        local byte = text:byte(i)
-        -- Continuation bytes are 10xxxxxx; only count lead bytes.
-        if byte < 0x80 or byte >= 0xC0 then count = count + 1 end
-        i = i + 1
-    end
-    return count
-end
+-- Lives in core/text_nodes.lua, which measures its segment lengths the same way.
+local charCount = TextNodes.charCount
 
 BookContext.xpointerAtOffset = xpointerAtOffset
 BookContext.charCount = charCount
+BookContext.blockPath = blockPath
 -- Exposed for the spec that pins the page pre-check and the per-line check to one list.
 BookContext.QUOTE_MARKERS = QUOTE_MARKERS
 BookContext.QUOTE_BLOCK_MARKERS = QUOTE_BLOCK_MARKERS
 BookContext.isQuoteBlockHTML = isQuoteBlockHTML
 
+-- The text nodes of the block a pointer sits in, cached per block.
+--
+-- `known_html` is the markup the caller already has -- every profile but `dialogue` carries
+-- it on the node -- so the common case adds no native call at all. The `dialogue` profile
+-- has no HTML (it skips the structure pass on purpose), so there it costs one read per
+-- block that actually contains an utterance, which is what the old code paid per *line*
+-- anyway when it fell through to whole-line tinting.
+local function blockSegments(self, block, tag, known_html)
+    local cache = self.cache
+    if not cache then
+        cache = {}
+        self.cache = cache
+    end
+    local store = cache.block_segments
+    if not store then
+        store = {}
+        cache.block_segments = store
+    end
+    local hit = store[block]
+    if hit ~= nil then
+        if self.perf then self.perf:mark("cache.block_segments." .. (hit and "hit" or "miss")) end
+        return hit or nil
+    end
+    local html = type(known_html) == "string" and known_html ~= "" and known_html or nil
+    if not html then
+        local document = self.ui.document
+        if type(document.getHTMLFromXPointer) ~= "function" then
+            store[block] = false
+            return nil
+        end
+        html = safeCall(function()
+            return document:getHTMLFromXPointer(block, 0x1001, true)
+        end, self.perf, "native.document.getHTML.text_nodes")
+        if type(html) ~= "string" or html == "" then
+            store[block] = false
+            return nil
+        end
+    end
+    local parsed = TextNodes.segments(html, tag ~= "" and tag or nil)
+    store[block] = parsed or false
+    return parsed
+end
+
+-- Which spelling of an only-child text node this engine accepts, "indexed" (text()[1]) or
+-- "plain" (text()). Kept off `self.cache` on purpose: it is a property of the build, not of
+-- the page, and must survive the invalidation that every page turn does.
+local function cachedSpelling(self)
+    return self.text_spelling
+end
+
+local function rememberSpelling(self, spelling)
+    if spelling and self.text_spelling ~= spelling then
+        self.text_spelling = spelling
+        if self.perf then self.perf:mark("data.text_node_spelling." .. spelling) end
+    end
+end
+
+-- Screen boxes clipped to the visible viewport, or nil when nothing survives. A plain
+-- function, not a method: the specs drive boxesForRange with a stub table rather than a
+-- BookContext instance.
+local function clipBoxes(self, boxes)
+    local page = self:_page()
+    local clipped = {}
+    for _, box in ipairs(boxes) do
+        local ok = clipBox(box, page.viewport.w, page.viewport.h)
+        if ok then table.insert(clipped, ok) end
+    end
+    if #clipped == 0 then return nil end
+    return clipped
+end
+
 -- Screen boxes for a byte range inside the text node that `xpointer` addresses.
--- Returns nil when the document cannot resolve the range, so callers can fall
--- back to the whole-line box rather than drawing nothing.
-function BookContext:boxesForRange(xpointer, first_byte, last_byte, text, text_origin)
+-- Returns nil when the document cannot resolve the range, so callers can decide
+-- what to do without geometry -- which, for a sub-line mark, means marking
+-- nothing rather than covering the whole line.
+--
+-- `text_scope` says what `text` covers: "block" for the whole paragraph (offsets are
+-- paragraph-wide and may cross text nodes), "node" for text measured inside one text node.
+-- Without it the scope is inferred from `text_origin == 0`, which is what the older callers
+-- meant by it -- but a stitched run of lines that happens to start at offset 0 of its node
+-- means "node", so callers that can tell should say so.
+function BookContext:boxesForRange(xpointer, first_byte, last_byte, text, text_origin,
+        text_scope, node_html)
     local document = self.ui.document
     if type(document.getScreenBoxesFromPositions) ~= "function" then return nil end
     local perf_started = self.perf and self.perf:start()
+    local function done(result)
+        if self.perf then
+            if result then self.perf:mark("data.quote_boxes", #result) end
+            self.perf:finish("phase.book_context.boxes_for_range", perf_started)
+        end
+        return result
+    end
     -- The xpointer's trailing number is the char offset of the range's first
     -- character inside its text node. For a line that starts mid-node (a
     -- wrapped paragraph), that base must be ADDED to the offsets computed from
     -- the line's own screen_text, not replace them: replacing would point at
     -- characters earlier in the node and paint a wrong short segment.
     local base, base_offset = xpointer:match("^(.*)%.(%d+)$")
-    if not base then
-        if self.perf then self.perf:finish("phase.book_context.boxes_for_range", perf_started) end
-        return nil
-    end
+    if not base then return done(nil) end
     base_offset = tonumber(base_offset) or 0
+    local block_scope = false
     if text_origin then
         -- The caller knows where `text` begins inside the node -- 0 when it measured the
         -- offsets over the whole paragraph -- so the line's own base must not be added
@@ -700,39 +793,133 @@ function BookContext:boxesForRange(xpointer, first_byte, last_byte, text, text_o
         -- conventions agree, which is why the tint looked right everywhere except at the
         -- top of the page.
         base_offset = text_origin
+        block_scope = text_origin == 0
+    end
+    if text_scope == "block" then
+        block_scope = true
+    elseif text_scope == "node" then
+        block_scope = false
     end
     local start_offset = base_offset + charCount(text, first_byte - 1)
     local stop_offset = base_offset + charCount(text, last_byte)
-    local xp0 = base .. "." .. tostring(start_offset)
-    local xp1 = base .. "." .. tostring(stop_offset)
-    local boxes = safeCall(function()
-        return document:getScreenBoxesFromPositions(xp0, xp1, true)
-    end, self.perf, "native.document.getScreenBoxes.quote")
-    if type(boxes) ~= "table" or #boxes == 0 then
-        if self.perf then self.perf:finish("phase.book_context.boxes_for_range", perf_started) end
-        return nil
+
+    local function resolve(xp0, xp1)
+        local boxes = safeCall(function()
+            return document:getScreenBoxesFromPositions(xp0, xp1, true)
+        end, self.perf, "native.document.getScreenBoxes.quote")
+        if type(boxes) ~= "table" or #boxes == 0 then return nil end
+        return boxes
     end
-    local page = self:_page()
-    local clipped = {}
-    for _, box in ipairs(boxes) do
-        local ok = clipBox(box, page.viewport.w, page.viewport.h)
-        if ok then table.insert(clipped, ok) end
+
+    -- Is it safe to splice these offsets onto the pointer we were handed?
+    --
+    -- Only when they are measured over the same string the pointer counts in. Offsets
+    -- measured over the whole block are not, as soon as the block has more than one text
+    -- node: inline markup (<span class="dialogue">, <em>, a footnote link, Calibre's
+    -- <span class="calibreN">) splits it, and the pointer then addresses the wrong node.
+    -- Past the node's end the engine returns nothing, which is recoverable; inside a long
+    -- enough later node it silently returns geometry for the wrong words, which is not --
+    -- so the check happens before the call, not after it.
+    local block, relative, tag = blockPath(xpointer)
+    local naive_safe = true
+    if block_scope then
+        -- Safe only where the pointer's node *is* the whole block: no inline wrapper, and
+        -- no text siblings. An unindexed `text()` means exactly that -- crengine spells a
+        -- node with text siblings `text()[3]` (see the xpointer example in KOReader's
+        -- readerlink.lua), so the index is present whenever there is something to number.
+        naive_safe = relative == "" or relative == "text()"
     end
-    if #clipped == 0 then
-        if self.perf then self.perf:finish("phase.book_context.boxes_for_range", perf_started) end
-        return nil
+    local boxes
+    if naive_safe then
+        boxes = resolve(base .. "." .. tostring(start_offset), base .. "." .. tostring(stop_offset))
+        if boxes then return done(clipBoxes(self, boxes)) end
     end
-    if self.perf then
-        self.perf:mark("data.quote_boxes", #clipped)
-        self.perf:finish("phase.book_context.boxes_for_range", perf_started)
+
+    -- Either the pointer was rejected or the engine could not place it. Read the block's
+    -- text nodes and address the range where it actually lives, which may be two
+    -- different nodes for its start and its end.
+    if not block then return done(nil) end
+    local list = blockSegments(self, block, tag, node_html)
+    if not list then return done(nil) end
+    local node_start = 0
+    if not block_scope then
+        -- Line-scoped offsets start at the pointer, which may sit inside any of the block's
+        -- nodes; shift them into block coordinates so a range that runs past that node's
+        -- end -- a screen line crossing an inline span -- can still be placed.
+        local own = relative ~= "" and relative or nil
+        for _, segment in ipairs(list.segments) do
+            if own and (segment.path == own or segment.plain == own) then
+                node_start = segment.start
+                break
+            end
+        end
+    elseif list.total ~= charCount(text, #text) then
+        -- The markup and the text the offsets were measured over disagree; mapping would
+        -- be guesswork. Fewer marks is the acceptable failure here, wrong ones are not.
+        if self.perf then self.perf:mark("data.block_segments.length_mismatch") end
+        return done(nil)
     end
-    return clipped
+    local from = node_start + start_offset
+    local to = node_start + stop_offset
+    local first_segment, first_in_node = TextNodes.locate(list, from, "start")
+    local last_segment, last_in_node = TextNodes.locate(list, to, "stop")
+    if not (first_segment and last_segment) then return done(nil) end
+    -- Cheap proof that the mapping landed on the range we were asked about: the character
+    -- at the mapped position has to be the character the caller matched. This is what makes
+    -- an unverifiable guess about pointer spelling safe -- a mark is only drawn once the
+    -- text agrees, so the failure mode is a missing mark, never a misplaced one.
+    local wanted = text and text:sub(first_byte, first_byte)
+    local landed = TextNodes.byteAt(first_segment.text, first_in_node)
+    if wanted and wanted ~= "" and landed
+            and first_segment.text:sub(landed, landed) ~= wanted then
+        if self.perf then self.perf:mark("data.block_segments.text_mismatch") end
+        return done(nil)
+    end
+
+    -- Spell the pointers the way this build's engine does. Where a node is its parent's
+    -- only text child, `text()[1]` and `text()` name the same thing and crengine's parser
+    -- should take either; if it does not, one retry finds out and the answer is remembered
+    -- for the rest of the session, so at most one page pays an extra call.
+    local indexed_first = cachedSpelling(self) ~= "plain"
+    local attempts = {}
+    local function attempt(plain_first)
+        local path0 = (plain_first and first_segment.plain or first_segment.path)
+        local path1 = (plain_first and last_segment.plain or last_segment.path)
+        if not (path0 and path1) then return end
+        local xp0 = block .. "/" .. path0 .. "." .. tostring(first_in_node)
+        local xp1 = block .. "/" .. path1 .. "." .. tostring(last_in_node)
+        for _, seen in ipairs(attempts) do
+            if seen[1] == xp0 and seen[2] == xp1 then return end
+        end
+        table.insert(attempts, { xp0, xp1, plain_first and "plain" or "indexed" })
+    end
+    attempt(not indexed_first)
+    attempt(indexed_first)
+    for _, candidate in ipairs(attempts) do
+        local xp0, xp1, spelling = candidate[1], candidate[2], candidate[3]
+        local already_refused = naive_safe and xp0 == base .. "." .. tostring(start_offset)
+            and xp1 == base .. "." .. tostring(stop_offset)
+        if not already_refused then
+            boxes = resolve(xp0, xp1)
+            if boxes then
+                rememberSpelling(self, spelling)
+                return done(clipBoxes(self, boxes))
+            end
+        end
+    end
+    return done(nil)
 end
 
--- Word boxes (and their screen texts) for one screen line. The semantic nodes
--- are usually word-sized already, but a line rendered as a single long run
--- (common for CJK without markup) arrives as one node; splitting it here lets
--- the dialogue painter shade exactly the quoted words instead of the whole line.
+-- Word boxes (and their screen texts) for one screen line, by asking the engine to
+-- re-extract the line and then naming every word box it hands back.
+--
+-- Nothing calls this. It is kept as the general answer to "which words sit where on this
+-- line", but it is the wrong tool for anything that runs on a page turn: one
+-- getTextFromPositions for the line plus one more per word box (textForBox caches on box
+-- identity, and these sboxes are freshly allocated every call, so nothing is reused) is
+-- ~1 + N native calls per line -- an order of magnitude past a whole page's budget. Both
+-- painters that need sub-line geometry go through boxesForRange instead, which costs one
+-- native call per marked run and none for unmarked text.
 function BookContext:lineWordBoxes(line_box)
     local document = self.ui.document
     if type(document.getTextFromPositions) ~= "function" then return nil end

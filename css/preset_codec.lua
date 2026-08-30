@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
 local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
@@ -209,47 +216,92 @@ local function validateParams(config)
     return true
 end
 
-local function validateCustomHeader(value)
+-- Derived, not restated: core/config.lua owns these lists (see Config.STATUS_SLOTS).
+local VALID_BAR_SLOTS = Config.STATUS_SLOTS
+local VALID_BAR_PRESETS = Config.STATUS_PRESETS
+local VALID_DIVIDER_STYLES = Config.STATUS_DIVIDERS
+
+-- The accepted field names are exactly the keys normalize() keeps, so take them from the
+-- defaults rather than typing them out again. PresetCodec.bundle exports
+-- Config.normalize(config) verbatim, which means any key in the defaults but missing from
+-- this set makes every exported preset unimportable -- and that is not hypothetical:
+-- chapter_ticks was added to the header defaults and not to the hand-written list here,
+-- so "unknown custom header field: chapter_ticks" rejected every file the plugin wrote.
+-- Two table walks at load time, on a module that only runs on import or export.
+local function fieldSet(defaults)
+    local set = {}
+    for key in pairs(defaults) do set[key] = true end
+    return set
+end
+local BAR_DEFAULTS = Config.defaults()
+local HEADER_FIELDS = fieldSet(BAR_DEFAULTS.custom_header)
+local FOOTER_FIELDS = fieldSet(BAR_DEFAULTS.custom_footer)
+
+-- An export written by an older build can carry a legacy slot or divider id.
+-- Config.normalize translates those on the way in, so the importer must not reject them
+-- before normalize ever sees them -- otherwise a file the plugin itself wrote is
+-- unimportable. Same alias tables as normalize, so the two cannot disagree.
+local function canonicalBarId(id, aliases)
+    if type(id) ~= "string" then return id end
+    return aliases[id] or id
+end
+
+-- Everything a bar config has in common: the same slot ids, presets, dividers and font
+-- range apply to the header and the footer, so the checks live in one place and only the
+-- field set and the label differ.
+local function validateBar(value, fields, label)
     if value == nil then return true end
-    if type(value) ~= "table" then return nil, "custom_header must be an object" end
-    local ok, err = onlyKeys(value, {
-        enabled = true, preset = true, left = true, center = true, right = true,
-        custom_text = true, font_size = true, font_bold = true, font_italic = true,
-        divider_style = true, divider_thickness = true, divider_custom_char = true,
-        top_offset = true, padding_bottom = true, hide_on_chapter_start = true,
-    }, "custom header field")
+    if type(value) ~= "table" then return nil, label .. " must be an object" end
+    local ok, err = onlyKeys(value, fields, label .. " field")
     if not ok then return nil, err end
     if value.enabled ~= nil and type(value.enabled) ~= "boolean" then
         return nil, "enabled must be a boolean"
     end
-    if value.preset ~= nil and not oneOf(value.preset, { "minimal", "modern", "classic", "reading", "custom" }) then
+    if value.preset ~= nil and not oneOf(value.preset, VALID_BAR_PRESETS) then
         return nil, "preset has an unsupported value"
     end
-    local valid_slots = {
-        "none", "chapter_title", "book_title", "author", "clock", "battery",
-        "time_battery", "reading_percent", "page_progress", "progress_combo",
-        "pages_left_chapter", "custom_text",
-    }
     for _, slot in ipairs({ "left", "center", "right" }) do
-        if value[slot] ~= nil and not oneOf(value[slot], valid_slots) then
+        if value[slot] ~= nil
+                and not oneOf(canonicalBarId(value[slot], Config.STATUS_SLOT_ALIASES),
+                    VALID_BAR_SLOTS) then
             return nil, slot .. " has an unsupported value"
         end
     end
-    if value.divider_style ~= nil and not oneOf(value.divider_style, {
-        "none", "solid", "dashed", "dots_small", "dots_big",
-        "vertical_bar", "slash", "double_slash", "custom",
-    }) then
+    if value.divider_style ~= nil
+            and not oneOf(canonicalBarId(value.divider_style, Config.STATUS_DIVIDER_ALIASES),
+                VALID_DIVIDER_STYLES) then
         return nil, "divider_style has an unsupported value"
     end
+    if value.divider_position ~= nil
+            and not oneOf(value.divider_position, { "auto", "above", "below" }) then
+        return nil, "divider_position has an unsupported value"
+    end
+    -- Numbers are rejected here, not clamped, while Config.normalize clamps the same
+    -- fields instead of resetting them. That difference is deliberate: normalize runs on a
+    -- saved config with no user present, so silently keeping the reader's intent beats
+    -- discarding it -- whereas an import is an explicit action with a visible error
+    -- message, and a file that says 30 should not quietly become 28. Legacy *ids* are
+    -- still translated above, because a renamed id carries the same intent; a number out
+    -- of range does not.
     if value.divider_thickness ~= nil and (type(value.divider_thickness) ~= "number"
-            or value.divider_thickness % 1 ~= 0 or value.divider_thickness < 1 or value.divider_thickness > 3) then
+            or value.divider_thickness % 1 ~= 0 or value.divider_thickness < 1
+            or value.divider_thickness > Config.STATUS_DIVIDER_THICKNESS_MAX) then
         return nil, "divider_thickness is out of range"
     end
     if value.font_size ~= nil and (type(value.font_size) ~= "number"
-            or value.font_size < 8 or value.font_size > 32) then
+            or value.font_size < Config.STATUS_FONT_MIN
+            or value.font_size > Config.STATUS_FONT_MAX) then
         return nil, "font_size is out of range"
     end
     return true
+end
+
+local function validateCustomHeader(value)
+    return validateBar(value, HEADER_FIELDS, "custom header")
+end
+
+local function validateCustomFooter(value)
+    return validateBar(value, FOOTER_FIELDS, "custom footer")
 end
 
 local function validateConfig(value)
@@ -260,6 +312,8 @@ local function validateConfig(value)
     if not semantic_ok then return nil, semantic_err end
     local header_ok, header_err = validateCustomHeader(value.custom_header)
     if not header_ok then return nil, header_err end
+    local footer_ok, footer_err = validateCustomFooter(value.custom_footer)
+    if not footer_ok then return nil, footer_err end
     if value.underline ~= nil and type(value.underline) ~= "string" then
         return nil, "underline must be a string"
     end

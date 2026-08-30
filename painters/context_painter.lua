@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
 local MarkLayout = dofile(PLUGIN_ROOT .. "painters/mark_layout.lua")
@@ -37,6 +44,10 @@ local function scaledOptions(options)
     local copy = {}
     for key, value in pairs(options or {}) do copy[key] = value end
     copy.thickness = math.max(1, Screen:scaleBySize(tonumber(copy.thickness) or 1))
+    -- Stored unscaled like `thickness`, so it scales here too. Zero stays zero: scaleBySize
+    -- rounds up to 1 on most screens, which would give "off" a visible one-pixel trim.
+    local inset = tonumber(copy.vertical_inset) or 0
+    copy.vertical_inset = inset > 0 and Screen:scaleBySize(inset) or 0
     return copy
 end
 
@@ -144,9 +155,12 @@ function ContextPainter:paintTo(bb, x, y)
             local options = scaledOptions(self.dialogue_painter)
             local context = self.context
             if context and type(context.boxesForRange) == "function" then
-                options.quote_boxes = function(node, range, text, text_origin)
+                -- node.html is passed along so a paragraph split by inline markup can be
+                -- mapped to the text node a run really lives in without a second DOM read:
+                -- every profile but `dialogue` already carries the markup.
+                options.quote_boxes = function(node, range, text, text_origin, text_scope)
                     return context:boxesForRange(node.pos0 or node.xpointer,
-                        range.first, range.last, text, text_origin)
+                        range.first, range.last, text, text_origin, text_scope, node.html)
                 end
             end
             local rects = measured(self.perf, "phase.layout.dialogue", function()
@@ -156,9 +170,28 @@ function ContextPainter:paintTo(bb, x, y)
         end
 
         if self.emphasis_painter.enabled then
+            local options = scaledOptions(self.emphasis_painter)
+            -- 着重号 geometry is in device pixels, and scaledOptions only scales
+            -- `thickness`, which the emphasis layout does not read. Unscaled, a 2px dot
+            -- spaced every 12px is roughly half size and twice as dense as intended on a
+            -- 300 DPI screen -- and there is no menu row to compensate with. Defaults are
+            -- repeated from emphasis_layout because the keys are optional in the config.
+            options.size = math.max(1, Screen:scaleBySize(tonumber(self.emphasis_painter.size) or 2))
+            options.gap = math.max(4, Screen:scaleBySize(tonumber(self.emphasis_painter.gap) or 12))
+            local context = self.context
+            if context and type(context.boxesForRange) == "function" then
+                -- The ranges are measured over the whole paragraph's text, so the line's
+                -- own base offset must not be added on top of them: text_origin = 0.
+                -- Without this resolver only fully emphasized paragraphs can be marked,
+                -- because there is no other way to tell which part of a line the run
+                -- occupies.
+                options.emphasis_boxes = function(node, range, text)
+                    return context:boxesForRange(node.pos0 or node.xpointer,
+                        range.first, range.last, text, 0, "block", node.html)
+                end
+            end
             local rects = measured(self.perf, "phase.layout.emphasis", function()
-                return EmphasisLayout.build(
-                    semantic_snapshot, scaledOptions(self.emphasis_painter))
+                return EmphasisLayout.build(semantic_snapshot, options)
             end)
             paintRects(bb, rects, self.perf)
         end

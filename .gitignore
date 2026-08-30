@@ -3,3 +3,4 @@ typefolio.koplugin.zip
 __pycache__/
 .DS_Store
 Thumbs.db
+.fuse_hidden*

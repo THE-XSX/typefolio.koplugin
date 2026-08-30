@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- Where the dialogue painter asks for quote geometry.
 --
 -- The painter runs quote detection over the whole paragraph, so a quote split across two
@@ -80,9 +87,9 @@ local function runBuild(node)
         mode = "tint",
         lang = "all",
         thickness = 1,
-        quote_boxes = function(n, range, text, text_scope)
+        quote_boxes = function(n, range, text, text_origin, text_scope)
             return BookContext.boxesForRange(context, n.pos0 or n.xpointer,
-                range.first, range.last, text, text_scope)
+                range.first, range.last, text, text_origin, text_scope, n.html)
         end,
     })
     return asked
@@ -163,9 +170,9 @@ do
     }
     DialogueLayout.build(snapshot, {
         enabled = true, mode = "tint", lang = "all", thickness = 1,
-        quote_boxes = function(n, range, text, text_origin)
+        quote_boxes = function(n, range, text, text_origin, text_scope)
             return BookContext.boxesForRange(context, n.pos0 or n.xpointer,
-                range.first, range.last, text, text_origin)
+                range.first, range.last, text, text_origin, text_scope, n.html)
         end,
     })
     check("a two-line paragraph resolves once", #asked == 1)
@@ -211,6 +218,153 @@ do
     })
     check("node.text wins over a hand-stripped node.html",
         #prefer > 0 and prefer[1] == PARAGRAPH)
+end
+
+-- ------------------------------------------------ a paragraph split by inline markup
+--
+-- Reported from the device on 2026-08-22: on a Calibre edition whose utterances are
+-- wrapped in <span class="dialogue">, the tint covered the narration as well, and stopped
+-- exactly at the span. That boundary is the whole story. Inline markup splits a paragraph
+-- into several text nodes, crengine numbers them among their text siblings, and the
+-- paragraph-wide offset of the quote is past the end of the first node as soon as the
+-- quote is reached -- so the engine placed nothing and the painter fell back to the line
+-- box. Any <em>, <b>, footnote link or Calibre <span class="calibreN"> does it; a plain
+-- single-text-node <p>, which is all the fixtures above are, never could.
+--
+-- The stub below is the part that makes this testable: it refuses an offset past the end
+-- of its node, the way crengine does. A permissive stub answers every pointer and the
+-- fixture passes while the device does not.
+
+local PARA = "/body/DocFragment[2]/body/p[2]"
+local NODE1 = PARA .. "/text()[1]"      -- the narration before the span
+local QNODE = PARA .. "/span[1]/text()[1]" -- the utterance, inside the span
+local NODE2 = PARA .. "/text()[2]"      -- the tail after the span
+
+local LINE_BOX = { x = 40, y = 100, w = 500, h = 30 }
+local RUN_BOX = { x = 40, y = 100, w = 120, h = 30 }
+
+local function spanHTML(tail)
+    return "<p>" .. NARRATION .. '<span class="dialogue">' .. QUOTE .. "</span>"
+        .. (tail or TAIL) .. "</p>"
+end
+
+-- A document that knows how long each of its text nodes is.
+local function domContext(nodes, log, html)
+    return {
+        ui = {
+            document = {
+                getScreenBoxesFromPositions = function(_, xp0, xp1)
+                    table.insert(log.asked, { xp0 = xp0, xp1 = xp1 })
+                    local function resolves(xp)
+                        local path, offset = xp:match("^(.*)%.(%d+)$")
+                        local length = path and nodes[path]
+                        -- Offset == length is the node's end and is legal; past it the
+                        -- pointer does not resolve and no rect comes back.
+                        return length ~= nil and tonumber(offset) <= length
+                    end
+                    if not (resolves(xp0) and resolves(xp1)) then return {} end
+                    return { { x = RUN_BOX.x, y = RUN_BOX.y, w = RUN_BOX.w, h = RUN_BOX.h } }
+                end,
+                getHTMLFromXPointer = function(_, xp, _, from_final_parent)
+                    table.insert(log.html, { xp = xp, from_final_parent = from_final_parent })
+                    return html
+                end,
+            },
+        },
+        _page = function() return { viewport = { w = 600, h = 800 } } end,
+    }
+end
+
+local function paint(nodes, lengths, html)
+    local log = { asked = {}, html = {} }
+    local context = domContext(lengths, log, html)
+    local rects = DialogueLayout.build({
+        page = { viewport = { w = 600, h = 800 } },
+        nodes = nodes,
+    }, {
+        enabled = true, mode = "tint", lang = "all", thickness = 1,
+        -- Wired exactly as context_painter wires it, scope and markup included: the whole
+        -- point of these fixtures is what happens when the offsets and the pointer are
+        -- measured against different strings.
+        quote_boxes = function(n, range, text, text_origin, text_scope)
+            return BookContext.boxesForRange(context, n.pos0 or n.xpointer,
+                range.first, range.last, text, text_origin, text_scope, n.html)
+        end,
+    })
+    return rects, log
+end
+
+local function paintedWholeLine(rects)
+    for _, rect in ipairs(rects) do
+        if rect.w == LINE_BOX.w and rect.h == LINE_BOX.h then return true end
+    end
+    return false
+end
+
+local function askedInside(log, node_path)
+    for _, entry in ipairs(log.asked) do
+        if entry.xp0:find(node_path, 1, true) then return true end
+    end
+    return false
+end
+
+do
+    -- Two screen lines, as on the device: the second one starts in the narration node and
+    -- runs through the span into the tail. Both lines key on NODE1, so this is the pair
+    -- that got tinted end to end.
+    local lengths = {
+        [NODE1] = 10, [QNODE] = 5, [NODE2] = 12,
+    }
+    local rects, log = paint({
+        { box = { x = LINE_BOX.x, y = 100, w = LINE_BOX.w, h = 30 },
+          pos0 = NODE1 .. ".0", screen_text = NARRATION:sub(1, 18) },  -- 6 chars
+        { box = { x = LINE_BOX.x, y = 130, w = LINE_BOX.w, h = 30 },
+          pos0 = NODE1 .. ".6",
+          screen_text = NARRATION:sub(19) .. QUOTE .. TAIL:sub(1, 6) },
+    }, lengths, spanHTML())
+
+    check("the utterance is addressed in the node it actually lives in",
+        askedInside(log, QNODE))
+    check("the narration is not tinted along with it", not paintedWholeLine(rects))
+    check("something was tinted", #rects > 0)
+    check("the paragraph's markup is read at most once", #log.html <= 1)
+end
+
+do
+    -- Same paragraph, this time with node.text/node.html present (the "full" profile).
+    -- The line being resolved sits *after* the span, so its node is text()[2] while the
+    -- offsets are measured over the whole paragraph. Those offsets resolve inside a tail
+    -- this long -- the engine answers, with geometry from the wrong words. Nothing on
+    -- screen says the tint is wrong, which is why the pointer has to be rejected before
+    -- it is asked about.
+    local long_tail = TAIL .. TAIL          -- 24 characters
+    local lengths = { [NODE1] = 10, [QNODE] = 5, [NODE2] = 24 }
+    local rects, log = paint({
+        { box = { x = LINE_BOX.x, y = 100, w = LINE_BOX.w, h = 30 },
+          pos0 = NODE2 .. ".2",
+          text = NARRATION .. QUOTE .. long_tail,
+          html = spanHTML(long_tail),
+          screen_text = long_tail },
+    }, lengths, spanHTML(long_tail))
+
+    check("a pointer into the wrong text node is never asked about",
+        not askedInside(log, NODE2))
+    check("the utterance is addressed in the span node instead", askedInside(log, QNODE))
+    check("and no line box is tinted as a consolation", not paintedWholeLine(rects))
+end
+
+do
+    -- The common case must stay free: one text node, offsets valid, no markup to read.
+    local lengths = { [PARA .. "/text()"] = 27 }
+    local rects, log = paint({
+        { box = { x = LINE_BOX.x, y = 100, w = LINE_BOX.w, h = 30 },
+          pos0 = PARA .. "/text().0", text = PARAGRAPH,
+          html = "<p>" .. PARAGRAPH .. "</p>", screen_text = PARAGRAPH },
+    }, lengths, "<p>" .. PARAGRAPH .. "</p>")
+    check("a single-text-node paragraph resolves without reading any markup",
+        #log.html == 0)
+    check("and it resolves in one engine call", #log.asked == 1)
+    check("its quote is still tinted", #rects > 0 and not paintedWholeLine(rects))
 end
 
 print(string.format("dialogue_offset_spec: %s (%d checks, %d failures)",

@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- typefolio.koplugin/main.lua
 -- 文笺 / Type Folio: underline and typesetting tweaks for CRE books, applied
 -- through KOReader's official Style tweaks mechanism (a generated
@@ -13,11 +20,13 @@ local SelectorHelper = dofile(PLUGIN_ROOT .. "tools/selector_helper.lua")
 local Painter = dofile(PLUGIN_ROOT .. "painters/painter.lua")
 local ContextPainter = dofile(PLUGIN_ROOT .. "painters/context_painter.lua")
 local HeaderPainter = dofile(PLUGIN_ROOT .. "painters/header_painter.lua")
+local FooterPainter = dofile(PLUGIN_ROOT .. "painters/footer_painter.lua")
 local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
 local PerfCounter = dofile(PLUGIN_ROOT .. "core/perf_counter.lua")
 local RenderPlanner = dofile(PLUGIN_ROOT .. "core/render_planner.lua")
 local Engine = dofile(PLUGIN_ROOT .. "core/engine.lua")
 local FolioScene = dofile(PLUGIN_ROOT .. "core/folio_scene.lua")
+local MenuPreview = dofile(PLUGIN_ROOT .. "core/menu_preview.lua")
 local PresetCodec = dofile(PLUGIN_ROOT .. "css/preset_codec.lua")
 local Settings = dofile(PLUGIN_ROOT .. "settings/init.lua")
 local I18n = dofile(PLUGIN_ROOT .. "i18n/i18n.lua")
@@ -54,6 +63,8 @@ local PLUGIN_VERSION = (dofile(PLUGIN_ROOT .. "_meta.lua") or {}).version or "0.
 local PRESET_FOLDER_NAME = "typefolio_presets"
 local PERF_ENABLED_KEY = "typefolio_performance_counters"
 local PERF_REPORT_FILENAME = "typefolio-performance.log"
+-- Global rather than per book: it is a habit of the reader's, not a property of the book.
+local PREVIEW_ON_CHANGE_KEY = "typefolio_preview_on_change"
 
 local RENDER_POLICY_KEY = "typefolio_render_policy"
 local LEGACY_RENDER_MODE_KEY = "typefolio_render_mode"
@@ -70,6 +81,16 @@ end
 
 local function getStyleTweaksFolder()
     return DataStorage:getDataDir() .. "/styletweaks/"
+end
+
+-- Default on: a reader who changes a setting wants to see it. Unset means on, so the switch
+-- only ever stores a `false`.
+local function previewOnChangeEnabled()
+    return G_reader_settings:readSetting(PREVIEW_ON_CHANGE_KEY) ~= false
+end
+
+local function setPreviewOnChangeEnabled(enabled)
+    G_reader_settings:saveSetting(PREVIEW_ON_CHANGE_KEY, enabled and true or false)
 end
 
 local function saveCssToStyleTweaks(css)
@@ -571,6 +592,7 @@ local function applyStyle(self, config, opts)
         result = self.engine:apply(config, { persist = persist })
     end
     if self.header_painter then self.header_painter:setConfig(result.config) end
+    if self.footer_painter then self.footer_painter:setConfig(result.config) end
     if result.config and result.config.custom_header and result.config.custom_header.enabled == true then
         if self.ui and self.ui.document and self.ui.document.configurable then
             if self.ui.document.configurable.status_line == 0 then
@@ -757,7 +779,11 @@ function TypeFolio:_initEngine()
                 self.painter:setConfig(config)
             end
             if self.context_painter then self.context_painter:setConfig(config) end
+            -- Both bars, or neither: the footer was missing here, which only stayed
+            -- harmless because applyStyle happens to set both painters again right after
+            -- engine:apply returns. One bar wired up in each place is how they drift.
             if self.header_painter then self.header_painter:setConfig(config) end
+            if self.footer_painter then self.footer_painter:setConfig(config) end
             if self.book_context then self.book_context:invalidate("config_apply") end
         end,
         refresh = function()
@@ -774,8 +800,31 @@ function TypeFolio:init()
     }
     self.perf_counter:mark("event.plugin_init")
     self:_initEngine()
+    self:_initMenuPreview()
     self:onDispatcherRegisterActions()
     self.ui.menu:registerToMainMenu(self)
+end
+
+function TypeFolio:_initMenuPreview()
+    if self.menu_preview then return end
+    self.menu_preview = MenuPreview.new{
+        ui_manager = UIManager,
+        is_enabled = previewOnChangeEnabled,
+        schedule = function(action) UIManager:nextTick(action) end,
+        -- Required lazily and tolerantly: TrapWidget is old and stable, but a build without
+        -- it should lose the preview, not the plugin.
+        make_trap = function(dismiss_callback)
+            local ok, TrapWidget = pcall(require, "ui/widget/trapwidget")
+            if not ok or type(TrapWidget) ~= "table" then return nil end
+            -- No text, so the widget is invisible and UIManager skips refreshing it
+            -- entirely; resend_event stays off because the tap that brings the menu back
+            -- must not also turn the page.
+            return TrapWidget:new{ dismiss_callback = dismiss_callback }
+        end,
+        mark = function(name)
+            if self.perf_counter then self.perf_counter:mark(name) end
+        end,
+    }
 end
 
 function TypeFolio:onDispatcherRegisterActions()
@@ -836,9 +885,14 @@ function TypeFolio:onReaderReady()
         context = self.book_context,
         perf = self.perf_counter,
     }
+    self.footer_painter = FooterPainter:new{
+        context = self.book_context,
+        perf = self.perf_counter,
+    }
     self.view:registerViewModule("typefolio_painter", self.painter)
     self.view:registerViewModule("typefolio_context_painter", self.context_painter)
     self.view:registerViewModule("typefolio_header_painter", self.header_painter)
+    self.view:registerViewModule("typefolio_footer_painter", self.footer_painter)
     local backup = self.ui.doc_settings:readSetting(LEGACY_EXPERIMENT_BACKUP_KEY)
     if type(backup) == "table" then
         self.ui.doc_settings:saveSetting(CONFIG_KEY, Config.normalize(backup))
@@ -853,6 +907,7 @@ function TypeFolio:_invalidatePainter(reason)
     if self.book_context then self.book_context:invalidate(reason) end
     if self.semantic_index then self.semantic_index:invalidate(reason) end
     if self.header_painter then self.header_painter:invalidate(reason) end
+    if self.footer_painter then self.footer_painter:invalidate(reason) end
 end
 
 function TypeFolio:onPageUpdate() self:_invalidatePainter("page_update") end
@@ -862,6 +917,12 @@ function TypeFolio:onDocumentPartiallyRerendered() self:_invalidatePainter("docu
 function TypeFolio:onChangeViewMode() self:_invalidatePainter("change_view_mode") end
 function TypeFolio:onSetPageMargins() self:_invalidatePainter("set_page_margins") end
 function TypeFolio:onSetStatusLine() self:_invalidatePainter("set_status_line") end
+
+-- An invisible modal tap catcher that outlived the book would eat the first tap in the file
+-- manager and then try to re-show a menu belonging to a closed document.
+function TypeFolio:onCloseDocument()
+    if self.menu_preview then self.menu_preview:cancel() end
+end
 
 function TypeFolio:_setPerformanceCountersEnabled(enabled)
     enabled = enabled == true
@@ -1135,8 +1196,7 @@ function TypeFolio:_dialoguePainterItems()
         })
     end
 
-    local tint_items = {}
-    for _, value in ipairs(O.tint_level) do
+    local tint_items = {}    for _, value in ipairs(O.tint_level) do
         table.insert(tint_items, {
             text = tr(TINT_LEVEL_LABELS[value]),
             radio = true,
@@ -1187,6 +1247,40 @@ function TypeFolio:_dialoguePainterItems()
             end,
             sub_item_table = tint_items,
         },
+        -- Not _paramSpin: that helper reads tweak_params and gates on
+        -- tweaks[key] -- i.e. the CSS path -- while this setting belongs to the
+        -- painter and has to be reachable with the CSS path switched off.
+        {
+            text_func = function()
+                local value = self:_getDialoguePainter("vertical_inset") or 0
+                if value == 0 then
+                    return T(tr("Vertical inset: %1"), tr("None"))
+                end
+                return T(tr("Vertical inset: %1"), value .. "px")
+            end,
+            keep_menu_open = true,
+            enabled_func = painterOn,
+            callback = function(touchmenu_instance)
+                UIManager:show(SpinWidget:new{
+                    title_text = tr("Mark vertical inset"),
+                    -- Line boxes carry the line's leading, so a mark drawn to the full
+                    -- box height touches the rows above and below on tight spacing.
+                    info_text = tr("How far the mark keeps off the top and bottom of the line. Applies to all three marking styles."),
+                    value = self:_getDialoguePainter("vertical_inset") or 0,
+                    value_min = 0,
+                    value_max = Config.DIALOGUE_INSET_MAX,
+                    value_step = 1,
+                    value_hold_step = 2,
+                    unit = "px",
+                    default_value = 0,
+                    ok_always_enabled = true,
+                    callback = function(spin)
+                        self:_setDialoguePainter("vertical_inset", spin.value)
+                        if touchmenu_instance then touchmenu_instance:updateItems() end
+                    end,
+                })
+            end,
+        },
     }
 end
 
@@ -1218,11 +1312,14 @@ function TypeFolio:_tweakSubItems(key)
     elseif key == "blockquote_box" then
         return {
             self:_tweakEnableItem(key, "Blockquote"),
-            { text = tr("Left bar thickness"),
-              enabled_func = function() return getConfig(self.ui).tweaks[key] == true end,
-              sub_item_table = self:_paramSpin(key, "bar",
-                  { label = "Line thickness: %1", title = "Left bar thickness",
-                    min = 0, max = 10, unit = "px" }) },
+            -- A spin row is a single menu item, not a list of them. Handing it to
+            -- touchmenu as sub_item_table produced a table with no numeric entries,
+            -- which renders as an empty submenu, so this setting could not be reached
+            -- at all. _paramSpin already gates itself on the tweak being enabled, the
+            -- way the header_border rows above do it.
+            self:_paramSpin(key, "bar",
+                { label = "Left bar thickness: %1", title = "Left bar thickness",
+                  min = 0, max = 10, unit = "px" }),
             { text = tr("Background tint"),
               enabled_func = function() return getConfig(self.ui).tweaks[key] == true end,
               sub_item_table = self:_paramRadio(key, "tint", O.tint,
@@ -1312,7 +1409,19 @@ function TypeFolio:_buildContext()
         RENDER_POLICY_KEY = RENDER_POLICY_KEY,
         getRenderPolicy = getRenderPolicy,
         getConfig = function(ui) return getConfig(ui) end,
-        applyStyle = function(config, opts) return applyStyle(self, config, opts) end,
+        -- Every visible change the menu makes goes through here, which is why the preview
+        -- hangs off this one function instead of 168 menu callbacks: no callback has to know
+        -- about it, and a row that changes nothing on the page (performance counters, a
+        -- report, the help text) gets no preview for free, because it never calls applyStyle.
+        -- Only the menu's copy is wrapped -- a gesture or a book being opened also applies a
+        -- config, and neither has a menu to step aside.
+        applyStyle = function(config, opts)
+            local result = applyStyle(self, config, opts)
+            if self.menu_preview then self.menu_preview:requestAfterChange() end
+            return result
+        end,
+        previewOnChangeEnabled = previewOnChangeEnabled,
+        setPreviewOnChangeEnabled = setPreviewOnChangeEnabled,
         notify = notify,
         showInfo = showInfo,
         getCustomPresets = getCustomPresets,

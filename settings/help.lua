@@ -1,6 +1,37 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- settings/help.lua
 -- TypeFolio user guide and help submenu builder
 local HelpSettings = {}
+
+-- The Calibre regex guide, as lines. Exported because the health report shows the same
+-- guide at the bottom of its own text viewer; it used to carry a second, hand-typed copy
+-- of these regexes, and the copy had been abbreviated into something that silently
+-- matches nothing when pasted into Calibre.
+HelpSettings.CALIBRE_REGEX_KEYS = {
+    "HELP_CALIBRE_UNDERLINE",
+    "HELP_CALIBRE_DIALOGUE",
+    "HELP_CALIBRE_TITLE",
+    "HELP_CALIBRE_QUOTE",
+    "HELP_CALIBRE_DROPCAP",
+}
+
+function HelpSettings.calibreRegexLines(tr, with_title)
+    local lines = {}
+    if with_title then
+        table.insert(lines, tr("HELP_CALIBRE_REGEX_TITLE"))
+    end
+    for _, key in ipairs(HelpSettings.CALIBRE_REGEX_KEYS) do
+        if #lines > 0 then table.insert(lines, "") end
+        table.insert(lines, tr(key))
+    end
+    return lines
+end
 
 function HelpSettings.subItems(ctx)
     local tr = ctx.tr
@@ -37,20 +68,8 @@ function HelpSettings.subItems(ctx)
             text = tr("Calibre regex guide"),
             keep_menu_open = true,
             callback = function()
-                local help_lines = {
-                    tr("HELP_CALIBRE_REGEX_TITLE"),
-                    "",
-                    tr("HELP_CALIBRE_UNDERLINE"),
-                    "",
-                    tr("HELP_CALIBRE_DIALOGUE"),
-                    "",
-                    tr("HELP_CALIBRE_TITLE"),
-                    "",
-                    tr("HELP_CALIBRE_QUOTE"),
-                    "",
-                    tr("HELP_CALIBRE_DROPCAP"),
-                }
-                showInfo(table.concat(help_lines, "\n"))
+                showInfo(table.concat(
+                    HelpSettings.calibreRegexLines(tr, true), "\n"))
             end,
         },
         {

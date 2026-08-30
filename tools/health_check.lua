@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 local HealthCheck = {}
 
 local function safeCall(fn, perf, metric)
@@ -24,11 +31,24 @@ local function sampleTOCNodeHTML(ui, perf)
     if not (document and type(document.getHTMLFromXPointer) == "function") then return {} end
 
     local count = #toc_list
-    local indices = { 1 }
-    if count >= 2 then table.insert(indices, math.floor(count * 0.25) + 1) end
-    if count >= 3 then table.insert(indices, math.floor(count * 0.5) + 1) end
-    if count >= 4 then table.insert(indices, math.floor(count * 0.75) + 1) end
-    if count >= 5 then table.insert(indices, count) end
+    -- Start, three quarter marks, end. floor(count * fraction) + 1 collides with itself
+    -- on a short TOC -- 0.25 and 0.5 of two entries both land on entry 1 -- and every
+    -- collision was another getHTMLFromXPointer for a snippet already sampled: the most
+    -- expensive call in the health check, paid twice for nothing. Deduplicating also
+    -- lets the last entry in, which the old count >= 5 gate excluded from small books, at
+    -- no extra cost.
+    local indices, wanted = {}, {}
+    local function want(index)
+        if index >= 1 and index <= count and not wanted[index] then
+            wanted[index] = true
+            table.insert(indices, index)
+        end
+    end
+    want(1)
+    for _, fraction in ipairs({ 0.25, 0.5, 0.75 }) do
+        want(math.floor(count * fraction) + 1)
+    end
+    want(count)
 
     local sampled_html = {}
     for _, idx in ipairs(indices) do
@@ -119,8 +139,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Fully Supported",
             desc = "Detected standard <h1-h6> heading tags across chapters.",
-            action1 = "Plugin setting: Standard titles are active out-of-the-box.",
-            action2 = "Calibre edit: No EPUB modification required.",
+            action1 = "Standard titles are active out-of-the-box.",
+            action2 = "No EPUB modification required.",
         })
     elseif has_centered_heading then
         table.insert(features, {
@@ -128,8 +148,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "warn",
             badge = "【!】 Tweak Option Recommended",
             desc = "No <h1-h6> tags found, but centered paragraph titles were detected.",
-            action1 = "Plugin setting: Enable 'Also break on centered paragraphs' in menu.",
-            action2 = "Calibre edit: Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>",
+            action1 = "Enable 'Also break on centered paragraphs' in menu.",
+            action2 = "See the heading regex in the Calibre guide below.",
         })
     else
         table.insert(features, {
@@ -137,8 +157,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "info",
             badge = "【i】 Non-standard Markup",
             desc = "No clear heading tags or centered title markers detected in TOC samples.",
-            action1 = "Plugin setting: Add custom class selector under Semantic Settings.",
-            action2 = "Calibre edit: Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>",
+            action1 = "Add custom class selector under Semantic Settings.",
+            action2 = "See the heading regex in the Calibre guide below.",
         })
     end
 
@@ -155,8 +175,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Class Markup Found",
             desc = "Detected .dialogue / .dialog classes in HTML.",
-            action1 = "Plugin setting: Enable Dialogue Highlighting (Class mode).",
-            action2 = "Calibre edit: Class markup already present in EPUB.",
+            action1 = "Enable Dialogue Highlighting (Class mode).",
+            action2 = "Class markup already present in EPUB.",
         })
     elseif has_quotes then
         table.insert(features, {
@@ -164,8 +184,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Dynamic Detection Ready",
             desc = "No dialogue class found, but quote marks were detected.",
-            action1 = "Plugin setting: Enable 'Dynamic quotes detection' (no EPUB modification required).",
-            action2 = "Calibre edit: Search: “([^””]*)”  →  Replace: <span class=\"dialogue\">“\\1”</span>",
+            action1 = "Enable 'Dynamic quotes detection' (no EPUB modification required).",
+            action2 = "See the dialogue regex in the Calibre guide below.",
         })
     else
         table.insert(features, {
@@ -173,8 +193,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "info",
             badge = "【i】 No Quotes Sampled",
             desc = "No dialogue quotes or classes were found in sample pages.",
-            action1 = "Plugin setting: Keep Dynamic quotes detection enabled.",
-            action2 = "Calibre edit: Search: “([^””]*)”  →  Replace: <span class=\"dialogue\">“\\1”</span>",
+            action1 = "Keep Dynamic quotes detection enabled.",
+            action2 = "See the dialogue regex in the Calibre guide below.",
         })
     end
 
@@ -189,8 +209,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Fully Supported",
             desc = "Detected <blockquote> / .quote elements.",
-            action1 = "Plugin setting: Enable Blockquote Box styling in menu.",
-            action2 = "Calibre edit: No EPUB modification required.",
+            action1 = "Enable Blockquote Box styling in menu.",
+            action2 = "No EPUB modification required.",
         })
     else
         table.insert(features, {
@@ -198,8 +218,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "info",
             badge = "【i】 No Blockquote Found",
             desc = "No standard <blockquote> elements detected in sampled chapters.",
-            action1 = "Plugin setting: Add custom quote class under Semantic Settings if present.",
-            action2 = "Calibre edit: Search: <p[^>]*>【引用】([^\\n<]*)</p>  →  Replace: <blockquote><p>\\1</p></blockquote>",
+            action1 = "Add custom quote class under Semantic Settings if present.",
+            action2 = "See the blockquote regex in the Calibre guide below.",
         })
     end
 
@@ -214,8 +234,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "warn",
             badge = "【!】 Heading Tags Required",
             desc = "No <h1-h6> tags or .title class found. CSS first-letter selectors cannot locate chapter first paragraphs.",
-            action1 = "Plugin setting: Disable Drop Caps if not editing EPUB.",
-            action2 = "Calibre edit: Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>",
+            action1 = "Disable Drop Caps if not editing EPUB.",
+            action2 = "See the heading regex in the Calibre guide below.",
         })
     elseif has_fullwidth_space then
         table.insert(features, {
@@ -223,8 +243,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "warn",
             badge = "【!】 Space Cleanup Needed",
             desc = "Fullwidth indent spaces ('　') detected at paragraph starts.",
-            action1 = "Plugin setting: Drop Caps will target spaces unless cleaned.",
-            action2 = "Calibre edit: Search: (<h[1-4][^>]*>[^<]*</h[1-4]>\\s*<p[^>]*>)　+  →  Replace: \\1",
+            action1 = "Drop Caps will target spaces unless cleaned.",
+            action2 = "See the drop-cap space regex in the Calibre guide below.",
         })
     else
         table.insert(features, {
@@ -232,8 +252,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Fully Supported",
             desc = "Heading structure and first-line paragraphs are clean.",
-            action1 = "Plugin setting: Enable Drop Caps in menu.",
-            action2 = "Calibre edit: No EPUB modification required.",
+            action1 = "Enable Drop Caps in menu.",
+            action2 = "No EPUB modification required.",
         })
     end
 
@@ -244,8 +264,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Skip Headings Active",
             desc = "'Skip headings and centered text' is enabled.",
-            action1 = "Plugin setting: Skip Headings is already active.",
-            action2 = "Calibre edit: No EPUB modification required.",
+            action1 = "Skip Headings is already active.",
+            action2 = "No EPUB modification required.",
         })
     else
         table.insert(features, {
@@ -253,8 +273,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "warn",
             badge = "【!】 Recommendation",
             desc = "'Skip headings and centered text' is currently disabled.",
-            action1 = "Plugin setting: Enable 'Skip headings and centered text' in Text Marks menu.",
-            action2 = "Calibre edit: Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>",
+            action1 = "Enable 'Skip headings and centered text' in Text Marks menu.",
+            action2 = "See the heading regex in the Calibre guide below.",
         })
     end
 

@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- css_templates.lua
 -- 集中管理自定义排版与下划线的 CSS 规则模板 (修复引用块子元素遮挡导致的底色未生效问题)
 
@@ -454,21 +461,6 @@ CSSTemplates.layout_tweaks = {
 -- Preset names are locale source strings: keep them in English and add
 -- translations to locales/*.lua (the menu renders them through translate()).
 CSSTemplates.presets = {
-    all_dashed_mode = {
-        name = "All-line dashes",
-        underline = "all_lines_dashed_compat",
-        tweaks = { pure_black = true }
-    },
-    study = {
-        name = "Study notes",
-        underline = "em_only",
-        tweaks = { blockquote_box = true, pure_black = true }
-    },
-    vintage = {
-        name = "Vintage newspaper",
-        underline = "em_only",
-        tweaks = { drop_caps = true, header_border = true }
-    }
 }
 
 return CSSTemplates

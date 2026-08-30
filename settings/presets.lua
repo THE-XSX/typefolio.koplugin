@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- settings/presets.lua
 -- Presets settings: Built-in presets, custom presets CRUD, import/export preset files
 local item_path = debug.getinfo(1, "S").source:sub(2)
@@ -360,13 +367,21 @@ function PresetsSettings.items(ctx)
         text = tr("Restore default typesetting"),
         keep_menu_open = true,
         callback = function(touchmenu_instance)
-            applyStyle({
-                underline = "none",
-                line_thickness = "1.5px",
-                dash_pattern = "normal",
-                tweaks = {},
-                tweak_params = {},
-            })
+            -- Same hazard as the preset rows above, and it was still live here: a bare
+            -- literal handed to applyStyle is not a patch. Config.normalize fills every
+            -- absent section from the defaults, so this row also switched off both status
+            -- bars, the folio scene and all three painters -- while the notification
+            -- promised only that the typesetting tweaks were reset. Start from the current
+            -- config (getConfig returns a normalized copy) and reset the typesetting keys
+            -- only.
+            local config = getConfig(ui)
+            config.underline = "none"
+            config.line_thickness = "1.5px"
+            config.dash_pattern = "normal"
+            config.tweaks = {}
+            config.tweak_params = {}
+            config.koreader_settings = {}
+            applyStyle(config)
             notify(tr("All typesetting tweaks reset"))
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end,

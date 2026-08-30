@@ -21,6 +21,7 @@
 - [ ] **开书自动刷写**：在 `onReaderReady`（或开书事件）中，严格按当前书籍的 `doc_settings` 重刷输出状态（如 CSS 文件或 Painter 参数），防止跨书切换串样式。
 - [ ] **静默同步 (skip_persist)**：开书时的自动同步只刷新文件/内存状态，避免向全新书籍静默写入默认空配置。
 - [ ] **预设与配置分离**：全局预设库（如模板）与单书个性化开关（如当前选择的 Preset / 各种特效开关）存储位置清晰、互不干扰。
+- [ ] **关书清理常驻窗口**：任何为本书压在窗口栈上的常驻/模态窗口（尤其是无文字的 `TrapWidget` 这类看不见的接管层）必须在 `onCloseDocument` 里显式关闭。活过关书的模态层会吃掉文件管理器里的第一次点击，而它的回调还握着已关闭文档的窗口引用。
 
 ### 4. Crengine / Native 接口防崩溃
 - [ ] **Native 调用的 `pcall` 包裹**：凡涉及 `getWordBoxesFromPositions`、`getTextFromPositions`、`getNearestWordFromPosition` 等底层 xpointer 接口，全部进 `pcall` 防护。

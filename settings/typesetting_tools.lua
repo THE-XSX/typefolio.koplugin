@@ -1,8 +1,16 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- settings/typesetting_tools.lua
 -- Typesetting tools: Health check, Selector helper, Semantic drawing, Dialogue/Emphasis painters
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])settings[/\\]") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
 local HealthCheck = dofile(PLUGIN_ROOT .. "tools/health_check.lua")
+local HelpSettings = dofile(PLUGIN_ROOT .. "settings/help.lua")
 local SelectorHelper = dofile(PLUGIN_ROOT .. "tools/selector_helper.lua")
 local SpinWidget = require("ui/widget/spinwidget")
 local TextViewer = require("ui/widget/textviewer")
@@ -59,6 +67,9 @@ function TypesettingToolsSettings.showHealthReport(ctx)
         table.insert(lines, "")
         table.insert(lines, string.format(" ● %s  [%s]", tr(feat.name), tr(feat.badge)))
         table.insert(lines, "    • " .. tr("Diagnosis: ") .. tr(feat.desc))
+        -- The row labels carry the "(Plugin setting)" / "(Calibre edit)" part, so the
+        -- report's own strings must not repeat it. They used to, and every line of the
+        -- English report read "Option 1 (Plugin setting): Plugin setting: …".
         if feat.action1 then
             table.insert(lines, "    [1] " .. tr("Option 1 (Plugin setting): ") .. tr(feat.action1))
         end
@@ -71,14 +82,14 @@ function TypesettingToolsSettings.showHealthReport(ctx)
     table.insert(lines, "--------------------------------------------------")
     table.insert(lines, "【 " .. tr("Calibre Quick Regex Reference") .. " 】")
     table.insert(lines, "--------------------------------------------------")
-    table.insert(lines, tr("1. Dialogue (.dialogue):"))
-    table.insert(lines, "   " .. tr("Search: “([^””]*)”  →  Replace: <span class=\"dialogue\">“\\1”</span>"))
-    table.insert(lines, tr("2. Chapter Title (<h2>):"))
-    table.insert(lines, "   " .. tr("Search: <p[^>]*>\\s*(第[0-9一二...]+[章卷回][^<]*)</p>  →  Replace: <h2 class=\"chapter-title\">\\1</h2>"))
-    table.insert(lines, tr("3. Blockquote (<blockquote>):"))
-    table.insert(lines, "   " .. tr("Search: <p[^>]*>【引用】([^\\n<]*)</p>  →  Replace: <blockquote><p>\\1</p></blockquote>"))
-    table.insert(lines, tr("4. Clean Fullwidth Space:"))
-    table.insert(lines, "   " .. tr("Search: (<h[1-4][^>]*>[^<]*</h[1-4]>\\s*<p[^>]*>)　+  →  Replace: \\1"))
+    -- The same guide the help menu shows, from the same strings. This section used to
+    -- keep its own hand-typed copy, and the copy was wrong in two ways a reader could not
+    -- have guessed: "第[0-9一二...]+" pastes a literal ellipsis into Calibre and matches
+    -- no chapter number at all, and "[^””]" repeats the closing mark instead of excluding
+    -- both of them.
+    for _, line in ipairs(HelpSettings.calibreRegexLines(tr)) do
+        table.insert(lines, line)
+    end
     table.insert(lines, "--------------------------------------------------")
 
     UIManager:show(TextViewer:new{

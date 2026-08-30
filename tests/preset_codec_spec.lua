@@ -1,3 +1,10 @@
+-- SPDX-FileCopyrightText: Copyright (C) 2026 THE-XSX
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- Typefolio (文笺) - KOReader plugin
+-- Released under the GNU Affero General Public License v3.0 or later.
+-- See the LICENSE file in the project root for the full license text.
+
 -- PresetCodec.validate is the gate every imported .typefolio.json passes through, so it is
 -- the right place to reject values the CSS templates cannot render. Runs the real codec:
 -- preset_codec.lua only dofile()s core/config.lua, neither of which touches KOReader.
@@ -166,6 +173,117 @@ check("an invented parameter is still rejected",
     not effectValidates("drop_caps", { scale_factor = 2 }))
 check("an invented effect is still rejected",
     not effectValidates("sparkles", { on = true }))
+
+-- custom_header and custom_footer validation.
+--
+-- This block used to be written against left_slot / center_slot / right_slot / divider,
+-- none of which exist -- the schema keys are left / center / right / divider_style. Every
+-- value in it was therefore rejected as an unknown field, which made the three
+-- "... is rejected" checks pass no matter what the codec did, and hid a real bug: the
+-- header's accepted-field list had not been told about chapter_ticks, so the config
+-- PresetCodec.bundle writes was refused by PresetCodec.validate and no exported preset
+-- could be imported anywhere. Hence the round-trip check first, then the field checks
+-- with ids that really exist.
+local function headerFooterValidates(header_cfg, footer_cfg)
+    local ok, err = PresetCodec.validate{
+        format = PresetCodec.FORMAT,
+        format_version = PresetCodec.FORMAT_VERSION,
+        name = "Header Footer Test",
+        config = {
+            underline = "none",
+            custom_header = header_cfg,
+            custom_footer = footer_cfg,
+        },
+    }
+    return ok ~= nil, err
+end
+
+-- The invariant: what export writes, import must accept. bundle() emits
+-- Config.normalize(config) verbatim, so a normalized config is exactly what lands in the
+-- file, and any schema key the codec has not been told about breaks every export.
+local Config = loadModule("core/config.lua")
+local normalized = Config.normalize{
+    custom_header = { enabled = true },
+    custom_footer = { enabled = true },
+}
+local rt_ok, rt_err = PresetCodec.validate{
+    format = PresetCodec.FORMAT,
+    format_version = PresetCodec.FORMAT_VERSION,
+    name = "Round trip",
+    config = normalized,
+}
+check("a normalized config survives export -> import (" .. tostring(rt_err) .. ")",
+    rt_ok ~= nil)
+-- Field by field, so a single unknown key cannot hide behind an earlier failure.
+for _, bar in ipairs({ "custom_header", "custom_footer" }) do
+    local keys = {}
+    for key in pairs(normalized[bar]) do table.insert(keys, key) end
+    table.sort(keys)
+    for _, key in ipairs(keys) do
+        local one = { [key] = normalized[bar][key] }
+        local ok, err = headerFooterValidates(
+            bar == "custom_header" and one or nil,
+            bar == "custom_footer" and one or nil)
+        check(string.format("%s.%s = %s imports (%s)", bar, key,
+            tostring(normalized[bar][key]), tostring(err)), ok)
+    end
+end
+
+check("a fully specified header and footer validate",
+    (headerFooterValidates(
+        { enabled = true, preset = "classic_folio", font_size = Config.STATUS_FONT_MIN,
+          left = "none", center = "clock_12h", right = "none",
+          divider_style = "dots_small", divider_thickness = 2 },
+        { enabled = true, preset = "wechat_duokan", font_size = Config.STATUS_FONT_MAX,
+          left = "time_left_chapter", right = "reading_percent", divider_style = "none" }
+    )))
+
+check("a progress_bar divider with a CJK combo slot validates",
+    (headerFooterValidates(
+        nil,
+        { enabled = true, preset = "classic_folio", font_size = 12,
+          center = "book_title_page_progress_cn", divider_style = "progress_bar",
+          chapter_ticks = true }
+    )))
+
+-- The rejection checks, now that the surrounding keys are real: each bundle differs from
+-- a valid one in exactly the field under test.
+check("an unsupported slot id is rejected",
+    not (headerFooterValidates(nil, { enabled = true, left = "invalid_magic_slot" })))
+check("a slot key that does not exist in the schema is rejected",
+    not (headerFooterValidates(nil, { enabled = true, left_slot = "none" })))
+check("an unsupported divider is rejected",
+    not (headerFooterValidates({ enabled = true, divider_style = "invalid_wavy" }, nil)))
+check("a font_size above the range is rejected",
+    not (headerFooterValidates(nil,
+        { enabled = true, font_size = Config.STATUS_FONT_MAX + 1 })))
+check("a font_size below the range is rejected",
+    not (headerFooterValidates(nil,
+        { enabled = true, font_size = Config.STATUS_FONT_MIN - 1 })))
+check("a divider thickness out of range is rejected",
+    not (headerFooterValidates(nil,
+        { enabled = true, divider_thickness = Config.STATUS_DIVIDER_THICKNESS_MAX + 1 })))
+check("enabled must be a boolean",
+    not (headerFooterValidates(nil, { enabled = "yes" })))
+
+-- A file written by an older build carries the ids that build used. Config.normalize
+-- translates those, so the importer must not reject them on the way in -- otherwise the
+-- reader's own exported preset is unimportable, which is the same failure the
+-- chapter_ticks omission caused. Rejection has to stay a hard error, not a partial
+-- recovery, so this is the only place legacy values are tolerated.
+for legacy, current in pairs(Config.STATUS_SLOT_ALIASES) do
+    local ok, err = headerFooterValidates({ enabled = true, left = legacy }, nil)
+    check(string.format("a legacy slot id (%s) still imports (%s)", legacy, tostring(err)), ok)
+    check(string.format("and normalize turns it into %s", current),
+        Config.normalize{ custom_header = { left = legacy } }.custom_header.left == current)
+end
+for legacy, current in pairs(Config.STATUS_DIVIDER_ALIASES) do
+    local ok, err = headerFooterValidates(nil, { enabled = true, divider_style = legacy })
+    check(string.format("a legacy divider id (%s) still imports (%s)", legacy, tostring(err)), ok)
+    check(string.format("and normalize turns it into %s", current),
+        Config.normalize{ custom_footer = { divider_style = legacy } }
+            .custom_footer.divider_style == current)
+end
 
 print(string.format("preset_codec_spec: %s (%d checks, %d failures)",
     failures == 0 and "ok" or "FAILED", checks, failures))
