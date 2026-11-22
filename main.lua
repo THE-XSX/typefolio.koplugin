@@ -63,6 +63,20 @@ local PERF_ENABLED_KEY = "typefolio_performance_counters"
 local PERF_REPORT_FILENAME = "typefolio-performance.log"
 local PREVIEW_ON_CHANGE_KEY = "typefolio_preview_on_change"
 
+local DIALOGUE_SYNC_KEYS = {
+    "bookmark",
+    "percent_finished",
+    "last_percent",
+    "page",
+    "last_page",
+    "summary",
+    "stats",
+    "bookmarks",
+    "highlights",
+    "font_face",
+    "font_size",
+}
+
 local RENDER_POLICY_KEY = "typefolio_render_policy"
 local LEGACY_RENDER_MODE_KEY = "typefolio_render_mode"
 
@@ -457,6 +471,51 @@ function TypeFolio:onReaderReady()
     if self.ui.paging then return end
     if self.perf_counter then self.perf_counter:mark("event.reader_ready") end
     self._cached_config = nil
+
+    local doc_file = self.ui and self.ui.document and self.ui.document.file
+    if type(doc_file) == "string" and not EpubDialogueTagger.isTaggedCopy(doc_file) then
+        local cached_path = self:_getCachedDialogueCopyPath(doc_file)
+        if cached_path and lfs.attributes(cached_path) then
+            local auto_open = self.ui.doc_settings and self.ui.doc_settings:readSetting("typefolio_auto_open_copy")
+            if auto_open == nil then
+                local cfg = getConfig(self.ui)
+                local font = cfg.tweak_params and cfg.tweak_params.dialogue_style and cfg.tweak_params.dialogue_style.font_family
+                if (cfg.tweaks and cfg.tweaks.dialogue_style and type(font) == "string" and font ~= "")
+                        or (self.ui.doc_settings and self.ui.doc_settings:readSetting("typefolio_cached_copy") ~= nil) then
+                    auto_open = true
+                end
+            end
+            if auto_open == true and not self._switching_to_copy then
+                self._switching_to_copy = true
+                local ok_doc, DocSettings = pcall(require, "docsettings")
+                if ok_doc and DocSettings then
+                    pcall(function()
+                        local dest_settings = DocSettings:open(cached_path)
+                        if dest_settings then
+                            for _, key in ipairs(DIALOGUE_SYNC_KEYS) do
+                                local val = self.ui.doc_settings:readSetting(key)
+                                if val ~= nil then
+                                    dest_settings:saveSetting(key, val)
+                                end
+                            end
+                            dest_settings:flush()
+                        end
+                    end)
+                end
+                local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
+                if ok_reader and ReaderUI and type(ReaderUI.showReader) == "function" then
+                    UIManager:nextTick(function()
+                        self._switching_to_copy = nil
+                        ReaderUI:showReader(cached_path)
+                    end)
+                    notify(tr("Switched to dialogue-tagged copy"))
+                    return
+                end
+            end
+        end
+    end
+    self._switching_to_copy = nil
+
     self.book_context = BookContext.new{
         ui = self.ui,
         screen_size = function() return Screen:getWidth(), Screen:getHeight() end,
@@ -536,6 +595,124 @@ end
 function TypeFolio:onCloseDocument()
     if self.menu_preview then self.menu_preview:cancel() end
     self._cached_config = nil
+    self._switching_to_copy = nil
+    self:_syncDialogueCopyOnClose()
+end
+
+function TypeFolio:_getCachedDialogueCopyPath(src_path)
+    src_path = src_path or (self.ui and self.ui.document and self.ui.document.file)
+    if type(src_path) ~= "string" or src_path == "" then return nil end
+    if EpubDialogueTagger.isTaggedCopy(src_path) then return src_path end
+
+    local data_dir = DataStorage:getDataDir()
+    local config = getConfig(self.ui)
+    local lang = config.dialogue_painter and config.dialogue_painter.lang or "all"
+    local include_quotes = not (config.tweak_params and config.tweak_params.dialogue_style
+        and config.tweak_params.dialogue_style.include_quotes == false)
+    local attr = lfs.attributes(src_path)
+    local dest_path = EpubDialogueTagger.getCachedCopyPath(src_path, data_dir, {
+        lang = lang,
+        include_quotes = include_quotes,
+        size = attr and attr.size or 0,
+        mtime = attr and attr.modification or 0,
+    }, lfs)
+    if dest_path then
+        return dest_path
+    end
+
+    if self.ui and self.ui.doc_settings then
+        local recorded = self.ui.doc_settings:readSetting("typefolio_cached_copy")
+        if type(recorded) == "string" and recorded ~= "" and lfs.attributes(recorded) then
+            return recorded
+        end
+    end
+
+    return nil
+end
+
+function TypeFolio:_syncDialogueCopyOnClose()
+    local doc_file = self.ui and self.ui.document and self.ui.document.file
+    if type(doc_file) ~= "string" or doc_file == "" or not (self.ui and self.ui.doc_settings) then
+        return
+    end
+    local ok_doc, DocSettings = pcall(require, "docsettings")
+    if not (ok_doc and DocSettings) then return end
+
+    if EpubDialogueTagger.isTaggedCopy(doc_file) then
+        local orig_path = self.ui.doc_settings:readSetting("typefolio_source_file")
+        if type(orig_path) == "string" and orig_path ~= "" and lfs.attributes(orig_path) then
+            pcall(function()
+                local orig_settings = DocSettings:open(orig_path)
+                if orig_settings then
+                    for _, key in ipairs(DIALOGUE_SYNC_KEYS) do
+                        local val = self.ui.doc_settings:readSetting(key)
+                        if val ~= nil then
+                            orig_settings:saveSetting(key, val)
+                        end
+                    end
+                    local cfg = self.ui.doc_settings:readSetting(CONFIG_KEY)
+                    if type(cfg) == "table" then
+                        orig_settings:saveSetting(CONFIG_KEY, cfg)
+                    end
+                    orig_settings:saveSetting("typefolio_cached_copy", doc_file)
+                    orig_settings:flush()
+                end
+            end)
+        end
+    else
+        local cached_path = self:_getCachedDialogueCopyPath(doc_file)
+        if cached_path and lfs.attributes(cached_path) then
+            pcall(function()
+                local dest_settings = DocSettings:open(cached_path)
+                if dest_settings then
+                    for _, key in ipairs(DIALOGUE_SYNC_KEYS) do
+                        local val = self.ui.doc_settings:readSetting(key)
+                        if val ~= nil then
+                            dest_settings:saveSetting(key, val)
+                        end
+                    end
+                    local cfg = self.ui.doc_settings:readSetting(CONFIG_KEY)
+                    if type(cfg) == "table" then
+                        dest_settings:saveSetting(CONFIG_KEY, cfg)
+                    end
+                    dest_settings:flush()
+                end
+            end)
+        end
+    end
+end
+
+function TypeFolio:_returnToOriginalBook(touchmenu_instance)
+    local doc_file = self.ui and self.ui.document and self.ui.document.file
+    if not EpubDialogueTagger.isTaggedCopy(doc_file) then return end
+    local original = self.ui and self.ui.doc_settings and self.ui.doc_settings:readSetting("typefolio_source_file")
+    if type(original) ~= "string" or original == "" or not lfs.attributes(original) then
+        showInfo(tr("Original book file not found."))
+        return
+    end
+
+    self:_syncDialogueCopyOnClose()
+
+    local ok_doc, DocSettings = pcall(require, "docsettings")
+    if ok_doc and DocSettings then
+        pcall(function()
+            local orig_settings = DocSettings:open(original)
+            if orig_settings then
+                orig_settings:saveSetting("typefolio_auto_open_copy", false)
+                orig_settings:flush()
+            end
+        end)
+    end
+
+    if touchmenu_instance and touchmenu_instance.close_callback then
+        pcall(touchmenu_instance.close_callback)
+    end
+    local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
+    if ok_reader and ReaderUI and type(ReaderUI.showReader) == "function" then
+        UIManager:nextTick(function()
+            ReaderUI:showReader(original)
+        end)
+    end
 end
 
 function TypeFolio:_canGenerateDialogueCopy()
@@ -548,7 +725,9 @@ function TypeFolio:_canGenerateDialogueCopy()
     return doc_file:lower():match("%.epub$") ~= nil
 end
 
-function TypeFolio:_generateDialogueTaggedCopy(touchmenu_instance)
+function TypeFolio:_generateDialogueTaggedCopy(touchmenu_instance, opts)
+    opts = opts or {}
+    local force = opts.force == true
     if not self:_canGenerateDialogueCopy() then
         showInfo(tr("Dialogue-tagged copies are only supported for standard EPUB books."))
         return
@@ -579,6 +758,56 @@ function TypeFolio:_generateDialogueTaggedCopy(touchmenu_instance)
         return
     end
 
+    local function syncAndOpen(out_path)
+        pcall(function()
+            local DocSettings = require("docsettings")
+            local dest_settings = DocSettings:open(out_path)
+            if dest_settings then
+                local next_cfg = Config.clone(config)
+                next_cfg.tweaks.dialogue_style = true
+                next_cfg.koreader_settings = {}
+                dest_settings:saveSetting(CONFIG_KEY, next_cfg)
+                local tweaks = dest_settings:readSetting("style_tweaks") or {}
+                tweaks[TWEAK_ID] = true
+                dest_settings:saveSetting("style_tweaks", tweaks)
+                dest_settings:saveSetting("typefolio_source_file", src_path)
+                if self.ui and self.ui.doc_settings then
+                    for _, key in ipairs(DIALOGUE_SYNC_KEYS) do
+                        local val = self.ui.doc_settings:readSetting(key)
+                        if val ~= nil then
+                            dest_settings:saveSetting(key, val)
+                        end
+                    end
+                end
+                dest_settings:flush()
+            end
+            if self.ui and self.ui.doc_settings then
+                self.ui.doc_settings:saveSetting("typefolio_cached_copy", out_path)
+                self.ui.doc_settings:saveSetting("typefolio_auto_open_copy", true)
+                self.ui.doc_settings:flush()
+            end
+        end)
+
+        if touchmenu_instance and touchmenu_instance.close_callback then
+            pcall(touchmenu_instance.close_callback)
+        end
+        local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
+        if ok_reader and ReaderUI and type(ReaderUI.showReader) == "function" then
+            UIManager:nextTick(function()
+                ReaderUI:showReader(out_path)
+            end)
+        else
+            showInfo(T(tr("Dialogue-tagged copy saved to: %1"), out_path))
+        end
+    end
+
+    local dest_attr = lfs.attributes(dest_path)
+    if not force and dest_attr and (dest_attr.size or 0) > 0 then
+        notify(tr("Dialogue-tagged copy already exists. Opening copy…"))
+        syncAndOpen(dest_path)
+        return
+    end
+
     local working_msg = InfoMessage:new{
         text = tr("Generating dialogue-tagged EPUB copy…"),
     }
@@ -597,48 +826,10 @@ function TypeFolio:_generateDialogueTaggedCopy(touchmenu_instance)
     end
     local stats = type(stats_or_err) == "table" and stats_or_err or {}
 
-    -- Copy Type Folio config (with CSS dialogue styling enabled) and reading position
-    -- hint into the cached copy's doc_settings so the reader picks up seamlessly.
-    pcall(function()
-        local DocSettings = require("docsettings")
-        local dest_settings = DocSettings:open(out_path)
-        if dest_settings then
-            local next_cfg = Config.clone(config)
-            next_cfg.tweaks.dialogue_style = true
-            next_cfg.koreader_settings = {}
-            dest_settings:saveSetting(CONFIG_KEY, next_cfg)
-            local tweaks = dest_settings:readSetting("style_tweaks") or {}
-            tweaks[TWEAK_ID] = true
-            dest_settings:saveSetting("style_tweaks", tweaks)
-            dest_settings:saveSetting("typefolio_source_file", src_path)
-            if self.ui and self.ui.doc_settings then
-                local percent = self.ui.doc_settings:readSetting("percent_finished")
-                if percent ~= nil then
-                    dest_settings:saveSetting("percent_finished", percent)
-                end
-                local font_face = self.ui.doc_settings:readSetting("font_face")
-                if font_face ~= nil then
-                    dest_settings:saveSetting("font_face", font_face)
-                end
-            end
-            dest_settings:flush()
-        end
-    end)
-
     notify(T(tr("Tagged %1 dialogue runs across %2 chapters. Opening copy…"),
         tostring(stats.quotes_tagged or 0), tostring(stats.files_modified or 0)))
 
-    if touchmenu_instance and touchmenu_instance.close_callback then
-        pcall(touchmenu_instance.close_callback)
-    end
-    local ok_reader, ReaderUI = pcall(require, "apps/reader/readerui")
-    if ok_reader and ReaderUI and type(ReaderUI.showReader) == "function" then
-        UIManager:nextTick(function()
-            ReaderUI:showReader(out_path)
-        end)
-    else
-        showInfo(T(tr("Dialogue-tagged copy saved to: %1"), out_path))
-    end
+    syncAndOpen(out_path)
 end
 
 function TypeFolio:_getDialogueCacheSummary()
@@ -651,6 +842,11 @@ end
 
 function TypeFolio:_clearDialogueCache()
     local removed, freed = EpubDialogueTagger.clearCache(DataStorage:getDataDir())
+    if self.ui and self.ui.doc_settings then
+        self.ui.doc_settings:delSetting("typefolio_cached_copy")
+        self.ui.doc_settings:delSetting("typefolio_auto_open_copy")
+        self.ui.doc_settings:flush()
+    end
     notify(T(tr("Cleared %1 cached copy/copies (%2 MB)"),
         tostring(removed or 0), string.format("%.1f", (freed or 0) / (1024 * 1024))))
 end
@@ -775,8 +971,33 @@ function TypeFolio:_buildContext()
                 and self.last_apply.plan.dialogue_suppressed_by_css == true or false
         end,
         canGenerateDialogueCopy = function() return self:_canGenerateDialogueCopy() end,
-        generateDialogueTaggedCopy = function(touchmenu_instance)
-            return self:_generateDialogueTaggedCopy(touchmenu_instance)
+        hasExistingDialogueCopy = function()
+            return self:_getCachedDialogueCopyPath() ~= nil
+        end,
+        generateDialogueTaggedCopy = function(touchmenu_instance, opts)
+            return self:_generateDialogueTaggedCopy(touchmenu_instance, opts)
+        end,
+        openDialogueTaggedCopy = function(touchmenu_instance)
+            return self:_generateDialogueTaggedCopy(touchmenu_instance, { force = false })
+        end,
+        regenerateDialogueTaggedCopy = function(touchmenu_instance)
+            return self:_generateDialogueTaggedCopy(touchmenu_instance, { force = true })
+        end,
+        returnToOriginalBook = function(touchmenu_instance)
+            return self:_returnToOriginalBook(touchmenu_instance)
+        end,
+        isAutoOpenDialogueCopyEnabled = function()
+            if self.ui and self.ui.doc_settings then
+                local val = self.ui.doc_settings:readSetting("typefolio_auto_open_copy")
+                if val ~= nil then return val == true end
+            end
+            return self:_getCachedDialogueCopyPath() ~= nil
+        end,
+        setAutoOpenDialogueCopyEnabled = function(enabled)
+            if self.ui and self.ui.doc_settings then
+                self.ui.doc_settings:saveSetting("typefolio_auto_open_copy", enabled == true)
+                self.ui.doc_settings:flush()
+            end
         end,
         getDialogueCacheSummary = function() return self:_getDialogueCacheSummary() end,
         clearDialogueCache = function() return self:_clearDialogueCache() end,

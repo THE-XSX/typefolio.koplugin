@@ -45,5 +45,10 @@ local path_with = EpubDialogueTagger.buildCachePath("book.epub", "cache", { lang
 local path_without = EpubDialogueTagger.buildCachePath("book.epub", "cache", { lang = "cn", include_quotes = false })
 check("cache path differs when include_quotes changes", path_with ~= path_without)
 
+-- Test 6: getCachedCopyPath and hasCachedCopy non-existent
+local fake_path = EpubDialogueTagger.getCachedCopyPath("non_existent_book.epub", "cache_non_existent")
+check("getCachedCopyPath returns nil when file does not exist", fake_path == nil)
+check("hasCachedCopy returns false when file does not exist", EpubDialogueTagger.hasCachedCopy("non_existent_book.epub", "cache_non_existent") == false)
+
 print(string.format("epub_dialogue_tagger_spec: %d checks, %d failures", checks, failures))
 if failures > 0 then error("epub_dialogue_tagger_spec failed", 0) end

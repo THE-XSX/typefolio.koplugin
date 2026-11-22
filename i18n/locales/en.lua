@@ -481,6 +481,16 @@ return {
         ["Tagged %1 dialogue runs across %2 chapters. Opening copy…"] = "Tagged %1 dialogue runs across %2 chapters. Opening copy…",
         ["Dialogue-tagged copy saved to: %1"] = "Dialogue-tagged copy saved to: %1",
         ["Cleared %1 cached copy/copies (%2 MB)"] = "Cleared %1 cached copy/copies (%2 MB)",
+        ["An existing dialogue-tagged copy was found for this book. Open it now to apply the dialogue font?"] = "An existing dialogue-tagged copy was found for this book. Open it now to apply the dialogue font?",
+        ["Open copy"] = "Open copy",
+        ["Open existing dialogue copy"] = "Open existing dialogue copy",
+        ["Auto-open dialogue copy"] = "Auto-open dialogue copy",
+        ["Return to original book…"] = "Return to original book…",
+        ["Return to original untagged book? Auto-opening the dialogue copy will be paused."] = "Return to original untagged book? Auto-opening the dialogue copy will be paused.",
+        ["Return to original"] = "Return to original",
+        ["Switched to dialogue-tagged copy"] = "Switched to dialogue-tagged copy",
+        ["Dialogue-tagged copy already exists. Opening copy…"] = "Dialogue-tagged copy already exists. Opening copy…",
+        ["Original book file not found."] = "Original book file not found.",
 
         -- Emphasis dots submenu
         ["Dot size: %1 px"] = "Dot size: %1 px",

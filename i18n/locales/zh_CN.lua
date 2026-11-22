@@ -483,6 +483,16 @@ return {
         ["Tagged %1 dialogue runs across %2 chapters. Opening copy…"] = "已为 %2 个章节标注 %1 处对话，正在打开副本…",
         ["Dialogue-tagged copy saved to: %1"] = "对话标注副本已保存到：%1",
         ["Cleared %1 cached copy/copies (%2 MB)"] = "已清理 %1 本缓存副本（释放 %2 MB）",
+        ["An existing dialogue-tagged copy was found for this book. Open it now to apply the dialogue font?"] = "检测到本书已有对话标注副本，是否立即打开以应用对话字体？",
+        ["Open copy"] = "打开副本",
+        ["Open existing dialogue copy"] = "打开已有对话副本",
+        ["Auto-open dialogue copy"] = "自动打开对话副本",
+        ["Return to original book…"] = "切回原书未标注版本…",
+        ["Return to original untagged book? Auto-opening the dialogue copy will be paused."] = "确定切回原书未标注版本？将暂停自动打开对话副本。",
+        ["Return to original"] = "切回原书",
+        ["Switched to dialogue-tagged copy"] = "已自动切换至对话标注副本",
+        ["Dialogue-tagged copy already exists. Opening copy…"] = "检测到已有对话标注副本，正在打开…",
+        ["Original book file not found."] = "未找到原书文件。",
 
         -- Emphasis dots submenu
         ["Dot size: %1 px"] = "着重号点径：%1 px",

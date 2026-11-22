@@ -250,16 +250,29 @@ function TweakMenus.dialogueFontItems(ctx)
 
         if face ~= "" and ctx.hasDialogueClassMarkup and not ctx.hasDialogueClassMarkup()
                 and ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() then
-            UIManager:show(ConfirmBox:new{
-                text = tr("This EPUB has no dialogue class markup yet, so changing the dialogue font requires a dialogue-tagged copy. Generate a cached copy now without modifying the original book?"),
-                ok_text = tr("Generate & open"),
-                ok_callback = function()
-                    if ctx.generateDialogueTaggedCopy then
-                        ctx.generateDialogueTaggedCopy(touchmenu_instance)
-                    end
-                end,
-                cancel_text = tr("Later"),
-            })
+            if ctx.hasExistingDialogueCopy and ctx.hasExistingDialogueCopy() then
+                UIManager:show(ConfirmBox:new{
+                    text = tr("An existing dialogue-tagged copy was found for this book. Open it now to apply the dialogue font?"),
+                    ok_text = tr("Open copy"),
+                    ok_callback = function()
+                        if ctx.openDialogueTaggedCopy then
+                            ctx.openDialogueTaggedCopy(touchmenu_instance)
+                        end
+                    end,
+                    cancel_text = tr("Later"),
+                })
+            else
+                UIManager:show(ConfirmBox:new{
+                    text = tr("This EPUB has no dialogue class markup yet, so changing the dialogue font requires a dialogue-tagged copy. Generate a cached copy now without modifying the original book?"),
+                    ok_text = tr("Generate & open"),
+                    ok_callback = function()
+                        if ctx.generateDialogueTaggedCopy then
+                            ctx.generateDialogueTaggedCopy(touchmenu_instance)
+                        end
+                    end,
+                    cancel_text = tr("Later"),
+                })
+            end
         end
     end
 
@@ -632,27 +645,90 @@ function TweakMenus.tweakSubItems(ctx, key)
         table.insert(items, paramToggle(ctx, key, "tint", "Background tint"))
         table.insert(items, paramToggle(ctx, key, "italic", "Italic"))
         items[#items].separator = true
-        table.insert(items, {
-            text_func = function()
-                local doc_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
-                if EpubDialogueTagger.isTaggedCopy(doc_file) then
-                    if ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() then
-                        return tr("Regenerate dialogue-tagged copy…")
+        local doc_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
+        if EpubDialogueTagger.isTaggedCopy(doc_file) then
+            table.insert(items, {
+                text = tr("Dialogue-tagged copy active"),
+                enabled_func = function() return false end,
+            })
+            table.insert(items, {
+                text = tr("Return to original book…"),
+                keep_menu_open = false,
+                callback = function(touchmenu_instance)
+                    UIManager:show(ConfirmBox:new{
+                        text = tr("Return to original untagged book? Auto-opening the dialogue copy will be paused."),
+                        ok_text = tr("Return to original"),
+                        ok_callback = function()
+                            if ctx.returnToOriginalBook then
+                                ctx.returnToOriginalBook(touchmenu_instance)
+                            end
+                        end,
+                        cancel_text = tr("Cancel"),
+                    })
+                end,
+            })
+            table.insert(items, {
+                text = tr("Regenerate dialogue-tagged copy…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.regenerateDialogueTaggedCopy then
+                        ctx.regenerateDialogueTaggedCopy(touchmenu_instance)
                     end
-                    return tr("Dialogue-tagged copy active")
-                end
-                return tr("Generate dialogue-tagged copy…")
-            end,
-            keep_menu_open = true,
-            enabled_func = function()
-                return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
-            end,
-            callback = function(touchmenu_instance)
-                if ctx.generateDialogueTaggedCopy then
-                    ctx.generateDialogueTaggedCopy(touchmenu_instance)
-                end
-            end,
-        })
+                end,
+            })
+        elseif ctx.hasExistingDialogueCopy and ctx.hasExistingDialogueCopy() then
+            table.insert(items, {
+                text = tr("Auto-open dialogue copy"),
+                keep_menu_open = true,
+                checked_func = function()
+                    return ctx.isAutoOpenDialogueCopyEnabled and ctx.isAutoOpenDialogueCopyEnabled() or false
+                end,
+                callback = function(touchmenu_instance)
+                    local curr = ctx.isAutoOpenDialogueCopyEnabled and ctx.isAutoOpenDialogueCopyEnabled() or false
+                    if ctx.setAutoOpenDialogueCopyEnabled then
+                        ctx.setAutoOpenDialogueCopyEnabled(not curr)
+                    end
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end,
+            })
+            table.insert(items, {
+                text = tr("Open existing dialogue copy"),
+                keep_menu_open = true,
+                callback = function(touchmenu_instance)
+                    if ctx.openDialogueTaggedCopy then
+                        ctx.openDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+            table.insert(items, {
+                text = tr("Regenerate dialogue-tagged copy…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.regenerateDialogueTaggedCopy then
+                        ctx.regenerateDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+        else
+            table.insert(items, {
+                text = tr("Generate dialogue-tagged copy…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.generateDialogueTaggedCopy then
+                        ctx.generateDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+        end
         table.insert(items, {
             text_func = function()
                 local info = ctx.getDialogueCacheSummary and ctx.getDialogueCacheSummary()
