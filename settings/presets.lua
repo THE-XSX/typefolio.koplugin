@@ -9,9 +9,10 @@
 -- Presets settings: Built-in presets, custom presets CRUD, import/export preset files
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])settings[/\\]") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
-local CSSTemplates = dofile(PLUGIN_ROOT .. "css/css_templates.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local CSSTemplates = ModuleLoader.load(PLUGIN_ROOT, "css/css_templates.lua")
 local InputDialog = require("ui/widget/inputdialog")
-local PresetCodec = dofile(PLUGIN_ROOT .. "css/preset_codec.lua")
+local PresetCodec = ModuleLoader.load(PLUGIN_ROOT, "css/preset_codec.lua")
 local UIManager = require("ui/uimanager")
 local ConfirmBox = require("ui/widget/confirmbox")
 
@@ -55,6 +56,31 @@ function PresetsSettings.customPresetEntryItems(ctx, name)
                     notify(T(tr("Applied preset: %1"), name))
                     if touchmenu_instance then touchmenu_instance:updateItems() end
                 end
+            end,
+        },
+        {
+            text_func = function()
+                local is_default = ctx.getDefaultNewBookPreset
+                    and ctx.getDefaultNewBookPreset() == name
+                return is_default and tr("Unset as default for new books")
+                    or tr("Set as default for new books")
+            end,
+            keep_menu_open = true,
+            checked_func = function()
+                return ctx.getDefaultNewBookPreset and ctx.getDefaultNewBookPreset() == name
+            end,
+            callback = function(touchmenu_instance)
+                if not ctx.setDefaultNewBookPreset then return end
+                local is_default = ctx.getDefaultNewBookPreset
+                    and ctx.getDefaultNewBookPreset() == name
+                if is_default then
+                    ctx.setDefaultNewBookPreset(nil)
+                    notify(tr("Cleared default preset for new books"))
+                else
+                    ctx.setDefaultNewBookPreset(name)
+                    notify(T(tr("Default preset for new books: %1"), name))
+                end
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         },
         {
@@ -181,10 +207,16 @@ function PresetsSettings.customPresetItems(ctx)
         return items
     end
     for _, name in ipairs(names) do
+        local preset_name = name
         table.insert(items, {
-            text = name,
+            text_func = function()
+                if ctx.getDefaultNewBookPreset and ctx.getDefaultNewBookPreset() == preset_name then
+                    return "★ " .. preset_name
+                end
+                return preset_name
+            end,
             keep_menu_open = true,
-            sub_item_table_func = function() return PresetsSettings.customPresetEntryItems(ctx, name) end,
+            sub_item_table_func = function() return PresetsSettings.customPresetEntryItems(ctx, preset_name) end,
         })
     end
     return items

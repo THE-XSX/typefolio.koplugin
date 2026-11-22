@@ -22,7 +22,7 @@ function RenderPlanner.normalizePolicy(policy)
     return "auto"
 end
 
-function RenderPlanner.plan(config, policy, painter_available)
+function RenderPlanner.plan(config, policy, painter_available, capabilities)
     policy = RenderPlanner.normalizePolicy(policy)
     local underline = config.underline or "none"
     local backend = "none"
@@ -53,6 +53,25 @@ function RenderPlanner.plan(config, policy, painter_available)
         end
     end
 
+    -- Dual-path dialogue coordination: when the book already carries dialogue class
+    -- markup (.tf-dlg, .dialogue, etc.) and CSS dialogue styling is enabled, automatically
+    -- suppress the runtime dynamic dialogue painter to prevent double-darkening and avoid
+    -- per-page-turn FFI text extraction overhead.
+    local css_dialogue = config.tweaks and config.tweaks.dialogue_style == true
+    local dp = config.dialogue_painter
+    local dialogue_painter_requested = type(dp) == "table" and dp.enabled == true
+    local has_dialogue_class = type(capabilities) == "table" and capabilities.has_dialogue_class == true
+    local dialogue_suppressed_by_css = dialogue_painter_requested and css_dialogue and has_dialogue_class
+    local dialogue_painter_enabled = dialogue_painter_requested and not dialogue_suppressed_by_css
+    local dialogue_backend = "none"
+    if css_dialogue and has_dialogue_class then
+        dialogue_backend = "css"
+    elseif dialogue_painter_enabled then
+        dialogue_backend = "paint"
+    elseif css_dialogue then
+        dialogue_backend = "css"
+    end
+
     return {
         policy = policy,
         underline = underline,
@@ -60,6 +79,9 @@ function RenderPlanner.plan(config, policy, painter_available)
         painter_enabled = backend == "paint",
         css_enabled = backend == "css" or has_tweaks,
         fallback = fallback,
+        dialogue_backend = dialogue_backend,
+        dialogue_painter_enabled = dialogue_painter_enabled,
+        dialogue_suppressed_by_css = dialogue_suppressed_by_css,
     }
 end
 

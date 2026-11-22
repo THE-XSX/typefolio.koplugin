@@ -30,7 +30,8 @@ local Device = require("device")
 local Font = require("ui/font")
 local TextWidget = require("ui/widget/textwidget")
 local Screen = Device.screen
-local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
 
 local StatusBarHelper = {}
 StatusBarHelper.__index = StatusBarHelper
@@ -42,9 +43,67 @@ StatusBarHelper.__index = StatusBarHelper
 local SLOT_ALIASES = Config.STATUS_SLOT_ALIASES
 local DIVIDER_ALIASES = Config.STATUS_DIVIDER_ALIASES
 
+local DEFAULT_ZH_STRINGS = {
+    STATUS_CLOCK_AM = "上午%d:%s",
+    STATUS_CLOCK_PM = "下午%d:%s",
+    STATUS_PAGE_N = "第 %d 页",
+    STATUS_BOOK_FALLBACK = "书籍正文",
+    STATUS_CHAPTER_PAGES_LEFT = "本章还剩 %d 页",
+    STATUS_CHAPTER_LAST_PAGE = "本章最后一页",
+    STATUS_CHAPTER_TIME_LEFT = "本章还剩 %s",
+    STATUS_BOOK_TIME_LEFT = "预计 %s 后读完",
+    STATUS_BOOK_PAGES_LEFT = "全书还剩 %d 页",
+    STATUS_BOOK_ALMOST_DONE = "即将读完",
+}
+
+local DEFAULT_EN_STRINGS = {
+    STATUS_CLOCK_AM = "%d:%s AM",
+    STATUS_CLOCK_PM = "%d:%s PM",
+    STATUS_PAGE_N = "Page %d",
+    STATUS_BOOK_FALLBACK = "Book",
+    STATUS_CHAPTER_PAGES_LEFT = "%d pages left in chapter",
+    STATUS_CHAPTER_LAST_PAGE = "Last page of chapter",
+    STATUS_CHAPTER_TIME_LEFT = "%s left in chapter",
+    STATUS_BOOK_TIME_LEFT = "%s left in book",
+    STATUS_BOOK_PAGES_LEFT = "%d pages left",
+    STATUS_BOOK_ALMOST_DONE = "Almost finished",
+}
+
+local function resolveStatusString(ctx, key)
+    if ctx and ctx.tr then
+        local ok, translated = pcall(ctx.tr, key)
+        if ok and type(translated) == "string" and translated ~= "" and translated ~= key then
+            return translated
+        end
+    end
+    local lang = ctx and ctx.lang
+    if type(lang) ~= "string" then
+        local settings = rawget(_G, "G_reader_settings")
+        if settings and type(settings.readSetting) == "function" then
+            local ok1, v1 = pcall(settings.readSetting, settings, "typefolio_language")
+            if ok1 and type(v1) == "string" and v1 ~= "" and v1 ~= "system" then
+                lang = v1
+            else
+                local ok2, v2 = pcall(settings.readSetting, settings, "language")
+                if ok2 and type(v2) == "string" and v2 ~= "" then
+                    lang = v2
+                end
+            end
+        end
+    end
+    if type(lang) == "string" then
+        local lowered = lang:lower()
+        if lowered == "c" or lowered:sub(1, 2) == "en" then
+            return DEFAULT_EN_STRINGS[key] or key
+        end
+    end
+    return DEFAULT_ZH_STRINGS[key] or key
+end
+
 function StatusBarHelper.new()
     local self = setmetatable({}, StatusBarHelper)
     self.toc_cache = nil
+    self._text_h_cache = {}
     return self
 end
 
@@ -70,15 +129,15 @@ function StatusBarHelper.canonicalDivider(id)
     return DIVIDER_ALIASES[id] or id
 end
 
-function StatusBarHelper.formatClock(is_12h)
+function StatusBarHelper.formatClock(is_12h, ctx)
     if is_12h then
         local hour = tonumber(os.date("%H")) or 0
         local min_str = os.date("%M")
         local is_pm = hour >= 12
         local h12 = hour % 12
         if h12 == 0 then h12 = 12 end
-        local prefix = is_pm and "下午" or "上午"
-        return string.format("%s%d:%s", prefix, h12, min_str)
+        local fmt = resolveStatusString(ctx, is_pm and "STATUS_CLOCK_PM" or "STATUS_CLOCK_AM")
+        return string.format(fmt, h12, min_str)
     else
         return os.date("%H:%M")
     end
@@ -188,17 +247,17 @@ local function timeForPages(ui, pages)
     return nil
 end
 
-function StatusBarHelper.getChapterRemainingInfo(ui, page_num)
+function StatusBarHelper.getChapterRemainingInfo(ui, page_num, ctx)
     local pages_left = StatusBarHelper.getChapterPagesLeft(ui, page_num)
     local time_text = timeForPages(ui, pages_left)
 
     local formatted
     if time_text then
-        formatted = string.format("本章还剩 %s", time_text)
+        formatted = string.format(resolveStatusString(ctx, "STATUS_CHAPTER_TIME_LEFT"), time_text)
     elseif pages_left and pages_left > 0 then
-        formatted = string.format("本章还剩 %d 页", pages_left)
+        formatted = string.format(resolveStatusString(ctx, "STATUS_CHAPTER_PAGES_LEFT"), pages_left)
     else
-        formatted = "本章最后一页"
+        formatted = resolveStatusString(ctx, "STATUS_CHAPTER_LAST_PAGE")
     end
 
     return {
@@ -208,17 +267,17 @@ function StatusBarHelper.getChapterRemainingInfo(ui, page_num)
     }
 end
 
-function StatusBarHelper.getBookRemainingInfo(ui, page_num, total_pages)
+function StatusBarHelper.getBookRemainingInfo(ui, page_num, total_pages, ctx)
     local pages_left = StatusBarHelper.getBookPagesLeft(ui, page_num, total_pages)
     local time_text = timeForPages(ui, pages_left)
 
     local formatted
     if time_text then
-        formatted = string.format("预计 %s 后读完", time_text)
+        formatted = string.format(resolveStatusString(ctx, "STATUS_BOOK_TIME_LEFT"), time_text)
     elseif pages_left and pages_left > 0 then
-        formatted = string.format("全书还剩 %d 页", pages_left)
+        formatted = string.format(resolveStatusString(ctx, "STATUS_BOOK_PAGES_LEFT"), pages_left)
     else
-        formatted = "即将读完"
+        formatted = resolveStatusString(ctx, "STATUS_BOOK_ALMOST_DONE")
     end
 
     return {
@@ -272,10 +331,12 @@ local SLOT_RESOLVERS = {
             local title = snapshot and snapshot.chapter and snapshot.chapter.title
             if type(title) == "string" and title ~= "" then return title end
         end
-        return string.format("第 %d 页", ctx.page_num)
+        return string.format(resolveStatusString(ctx, "STATUS_PAGE_N"), ctx.page_num)
     end,
 
-    book_title = function(ctx) return docTitle(ctx.ui, "书籍正文") end,
+    book_title = function(ctx)
+        return docTitle(ctx.ui, resolveStatusString(ctx, "STATUS_BOOK_FALLBACK"))
+    end,
 
     author = function(ctx)
         local ui = ctx.ui
@@ -285,22 +346,22 @@ local SLOT_RESOLVERS = {
         return ""
     end,
 
-    clock = function() return StatusBarHelper.formatClock(false) end,
+    clock = function(ctx) return StatusBarHelper.formatClock(false, ctx) end,
 
-    clock_12h = function() return StatusBarHelper.formatClock(true) end,
+    clock_12h = function(ctx) return StatusBarHelper.formatClock(true, ctx) end,
 
     battery = function(ctx) return StatusBarHelper.getBatteryInfo(ctx.ui).text end,
 
     time_battery = function(ctx)
         return string.format("%s · %s",
-            StatusBarHelper.formatClock(false),
+            StatusBarHelper.formatClock(false, ctx),
             StatusBarHelper.getBatteryInfo(ctx.ui).text)
     end,
 
     battery_time = function(ctx)
         return string.format("%s  %s",
             StatusBarHelper.getBatteryInfo(ctx.ui).text,
-            StatusBarHelper.formatClock(false))
+            StatusBarHelper.formatClock(false, ctx))
     end,
 
     reading_percent = function(ctx) return string.format("%d%%", ctx.percent) end,
@@ -324,21 +385,21 @@ local SLOT_RESOLVERS = {
     pages_left_chapter = function(ctx)
         local pages_left = StatusBarHelper.getChapterPagesLeft(ctx.ui, ctx.page_num)
         if pages_left and pages_left > 0 then
-            return string.format("本章还剩 %d 页", pages_left)
+            return string.format(resolveStatusString(ctx, "STATUS_CHAPTER_PAGES_LEFT"), pages_left)
         end
-        return "本章最后一页"
+        return resolveStatusString(ctx, "STATUS_CHAPTER_LAST_PAGE")
     end,
 
     time_left_chapter = function(ctx)
-        return StatusBarHelper.getChapterRemainingInfo(ctx.ui, ctx.page_num).formatted
+        return StatusBarHelper.getChapterRemainingInfo(ctx.ui, ctx.page_num, ctx).formatted
     end,
 
     time_left_book = function(ctx)
-        return StatusBarHelper.getBookRemainingInfo(ctx.ui, ctx.page_num, ctx.total_pages).formatted
+        return StatusBarHelper.getBookRemainingInfo(ctx.ui, ctx.page_num, ctx.total_pages, ctx).formatted
     end,
 
     time_left_book_pages = function(ctx)
-        local info = StatusBarHelper.getBookRemainingInfo(ctx.ui, ctx.page_num, ctx.total_pages)
+        local info = StatusBarHelper.getBookRemainingInfo(ctx.ui, ctx.page_num, ctx.total_pages, ctx)
         return string.format("%s   %d/%d", info.formatted, ctx.page_num, ctx.total_pages)
     end,
 
@@ -364,6 +425,8 @@ function StatusBarHelper.resolveSlotText(slot_type, ctx)
         total_pages = total_pages,
         book_context = ctx.book_context,
         custom_text = ctx.custom_text or "",
+        tr = ctx.tr,
+        lang = ctx.lang,
         percent = math.max(0, math.min(100, math.floor((page_num / total_pages) * 100))),
     }
 
@@ -433,42 +496,6 @@ local DIVIDER_PAINTERS = {
 
     dots_small = function(bb, o)
         paintDots(bb, o.x, o.y, o.width, Screen:scaleBySize(4), o.thickness)
-    end,
-
-    dots_big = function(bb, o)
-        local size = math.max(o.thickness, Screen:scaleBySize(2))
-        paintDots(bb, o.x, o.y, o.width, Screen:scaleBySize(8), size)
-    end,
-
-    vertical_bar = function(bb, o)
-        local bar_len = math.max(o.thickness, Screen:scaleBySize(4))
-        local gap = Screen:scaleBySize(6)
-        for px = o.x, o.x + o.width - o.thickness, gap do
-            bb:paintRect(px, o.y, o.thickness, bar_len, Blitbuffer.COLOR_BLACK)
-        end
-    end,
-
-    slash = function(bb, o)
-        local step = math.max(1, o.thickness)
-        local gap = Screen:scaleBySize(8)
-        for px = o.x, o.x + o.width - 3 * step, gap do
-            bb:paintRect(px, o.y + 2 * step, step, step, Blitbuffer.COLOR_BLACK)
-            bb:paintRect(px + step, o.y + step, step, step, Blitbuffer.COLOR_BLACK)
-            bb:paintRect(px + 2 * step, o.y, step, step, Blitbuffer.COLOR_BLACK)
-        end
-    end,
-
-    double_slash = function(bb, o)
-        local step = math.max(1, o.thickness)
-        local gap = Screen:scaleBySize(10)
-        for px = o.x, o.x + o.width - 6 * step, gap do
-            for pair = 0, 1 do
-                local base = px + pair * 3 * step
-                bb:paintRect(base, o.y + 2 * step, step, step, Blitbuffer.COLOR_BLACK)
-                bb:paintRect(base + step, o.y + step, step, step, Blitbuffer.COLOR_BLACK)
-                bb:paintRect(base + 2 * step, o.y, step, step, Blitbuffer.COLOR_BLACK)
-            end
-        end
     end,
 
     progress_bar = function(bb, o)
@@ -547,7 +574,8 @@ function StatusBarHelper:paintBar(bb, opts)
     -- so a configured 12 became roughly 38 device px -- which is why the bar collided with
     -- the body text and why the slot budgets truncated far earlier than the layout meant
     -- them to. KOReader's own footer passes its text_font_size the same way, unscaled.
-    local face = Font:getFace("cfont", cfg.font_size or 12)
+    local font_size = cfg.font_size or 12
+    local face = Font:getFace("cfont", font_size)
     if not face then return end
     local bold = cfg.font_bold == true
 
@@ -567,6 +595,8 @@ function StatusBarHelper:paintBar(bb, opts)
         total_pages = page_count,
         book_context = opts.book_context,
         custom_text = cfg.custom_text or "",
+        tr = opts.tr,
+        lang = opts.lang,
     }
 
     local left_slot, center_slot, right_slot = cfg.left, cfg.center, cfg.right
@@ -579,23 +609,77 @@ function StatusBarHelper:paintBar(bb, opts)
     local center_text = StatusBarHelper.resolveSlotText(center_slot, ctx)
     local right_text = StatusBarHelper.resolveSlotText(right_slot, ctx)
 
-    local gap = Screen:scaleBySize(12)
-    local side_max_w, center_max_w
-    if center_text ~= "" then
-        center_max_w = math.floor(usable_w * 0.44)
-        side_max_w = math.floor((usable_w - center_max_w - 2 * gap) / 2)
-    else
-        side_max_w = math.floor((usable_w - gap) / 2)
+    local function measureWidth(text)
+        if not text or text == "" then return 0 end
+        local probe = makeTextWidget(text, face, bold, usable_w)
+        local w = probe:getSize().w
+        probe:free()
+        return w
     end
-    if side_max_w < 1 then side_max_w = 0 end
 
-    -- Text height comes from the widget, not from the font size: a 13pt face is
-    -- taller than 13px once ascender and padding are included, and using the font
-    -- size put the divider through the descenders.
-    local text_h = 0
-    local probe = makeTextWidget("Ag", face, bold, usable_w)
-    text_h = probe:getSize().h
-    probe:free()
+    -- Flexible horizontal slot allocation: give short slots only what they need so
+    -- long titles do not truncate prematurely, while keeping the center column
+    -- visually centered on the bar and preventing any slot overlap.
+    local gap = Screen:scaleBySize(12)
+    local left_max_w, center_max_w, right_max_w = 0, 0, 0
+    local center_x = h_margin
+
+    if center_text == "" then
+        if left_text ~= "" and right_text == "" then
+            left_max_w = usable_w
+        elseif left_text == "" and right_text ~= "" then
+            right_max_w = usable_w
+        elseif left_text ~= "" and right_text ~= "" then
+            local avail = math.max(0, usable_w - gap)
+            local lw = measureWidth(left_text)
+            local rw = measureWidth(right_text)
+            if lw + rw <= avail then
+                left_max_w = lw
+                right_max_w = rw
+            else
+                local half = math.floor(avail / 2)
+                if rw <= half then
+                    right_max_w = rw
+                    left_max_w = math.max(0, avail - right_max_w)
+                elseif lw <= half then
+                    left_max_w = lw
+                    right_max_w = math.max(0, avail - left_max_w)
+                else
+                    left_max_w = half
+                    right_max_w = avail - half
+                end
+            end
+        end
+    else
+        if left_text == "" and right_text == "" then
+            center_max_w = usable_w
+            center_x = h_margin
+        else
+            local cw = measureWidth(center_text)
+            local lw = measureWidth(left_text)
+            local rw = measureWidth(right_text)
+            local max_side = math.max(lw, rw)
+            local base_center_cap = math.floor(usable_w * 0.44)
+            local elastic_center_cap = math.min(usable_w - 2 * gap, usable_w - 2 * (max_side + gap))
+            local center_cap = math.max(base_center_cap, elastic_center_cap)
+            center_max_w = math.max(0, math.min(cw, center_cap))
+            center_x = h_margin + math.floor((usable_w - center_max_w) / 2)
+            left_max_w = math.max(0, (center_x - gap) - h_margin)
+            right_max_w = math.max(0, (h_margin + usable_w) - (center_x + center_max_w + gap))
+        end
+    end
+
+    -- Text height comes from the widget, not from the font size, and is cached per
+    -- (font_size, bold) so page turns do not rebuild a throwaway probe widget.
+    self._text_h_cache = self._text_h_cache or {}
+    local cache_key = tostring(font_size) .. ":" .. (bold and "1" or "0")
+    local text_h = self._text_h_cache[cache_key]
+    if not text_h then
+        local probe = makeTextWidget("Ag", face, bold, usable_w)
+        text_h = probe:getSize().h
+        probe:free()
+        self._text_h_cache[cache_key] = text_h
+    end
 
     local text_y
     if opts.position == "bottom" then
@@ -606,22 +690,18 @@ function StatusBarHelper:paintBar(bb, opts)
     end
     if text_y < 0 then text_y = 0 end
 
-    -- Each column gets both its own budget and its own origin, because paintText aligns
-    -- within [x, x + max_w]: handing it the right width at the wrong x only moves the
-    -- collision. Passing usable_w let a long chapter title grow to the full bar and
-    -- centre itself on the bar rather than in its column; passing h_margin as the right
-    -- column's origin put the right slot's right edge at h_margin + side_max_w, i.e. in
-    -- the left half of the bar, directly on top of the left slot. TextWidget blits only
-    -- glyph coverage, so either way the result is superimposed text, not a truncation.
     local left_x = h_margin
-    local center_x = h_margin + math.floor((usable_w - (center_max_w or 0)) / 2)
-    local right_x = h_margin + usable_w - side_max_w
+    local right_x = h_margin + usable_w - right_max_w
 
-    StatusBarHelper.paintText(bb, left_text, left_x, text_y, side_max_w, "left", face, bold)
-    if center_text ~= "" then
+    if left_text ~= "" and left_max_w > 0 then
+        StatusBarHelper.paintText(bb, left_text, left_x, text_y, left_max_w, "left", face, bold)
+    end
+    if center_text ~= "" and center_max_w > 0 then
         StatusBarHelper.paintText(bb, center_text, center_x, text_y, center_max_w, "center", face, bold)
     end
-    StatusBarHelper.paintText(bb, right_text, right_x, text_y, side_max_w, "right", face, bold)
+    if right_text ~= "" and right_max_w > 0 then
+        StatusBarHelper.paintText(bb, right_text, right_x, text_y, right_max_w, "right", face, bold)
+    end
 
     local divider_style = StatusBarHelper.canonicalDivider(cfg.divider_style or "none")
     if divider_style ~= "none" then

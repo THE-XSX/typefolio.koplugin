@@ -5,22 +5,19 @@
 -- Released under the GNU Affero General Public License v3.0 or later.
 -- See the LICENSE file in the project root for the full license text.
 
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)painters[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
+
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local Screen = Device.screen
 
 local MARKER_DARKEN = 0.12
-
-local UNDERLINE_ALIASES = {
-    all_lines_dashed_compat = "all_lines",
-    all_lines_dashed = "all_lines",
-    all_lines_solid = "all_lines",
-    all_lines_dotted = "all_lines",
-    thick_lines = "all_lines",
-    para_dashed = "para",
-    para_dotted = "para",
-}
 
 local Painter = WidgetContainer:extend{
     enabled = false,
@@ -31,7 +28,8 @@ local Painter = WidgetContainer:extend{
 
 function Painter:setConfig(config)
     local underline = config.underline or "none"
-    self.underline = UNDERLINE_ALIASES[underline] or underline
+    local alias = Config.UNDERLINE_ALIASES[underline]
+    self.underline = alias and alias.underline or underline
     self.dash_pattern = config.dash_pattern or "normal"
     self.line_thickness = tonumber((tostring(config.line_thickness or "1.5px"):gsub("px", ""))) or 1.5
     self.skip_headings = config.skip_headings ~= false

@@ -8,38 +8,16 @@
 -- settings/folio_scenes.lua
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])settings[/\\]") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
-local FolioScene = dofile(PLUGIN_ROOT .. "core/folio_scene.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
+local FolioScene = ModuleLoader.load(PLUGIN_ROOT, "core/folio_scene.lua")
 
 local Event = require("ui/event")
 local UIManager = require("ui/uimanager")
 
 local FolioScenesSettings = {}
 
-local FOLIO_SCENE_LABELS = {
-    off = "Off",
-    auto = "Follow typesetting automatically",
-    quiet = "Quiet reading",
-    study = "Study notes",
-    editorial = "Editorial",
-    chapter = "Chapter focus",
-    swiss = "Swiss grid",
-    terminal = "Terminal",
-    quote = "Quote poster",
-    ticket = "Ticket stub",
-    cover = "Cover first",
-    gallery = "Gallery folio",
-    dossier = "Reading dossier",
-    archive = "Library archive",
-    bookpost = "Book post",
-    architecture = "Reading architecture",
-    zen = "Japanese minimal",
-    mei = "Plum blossom",
-    lan = "Orchid",
-    zhu = "Bamboo",
-    ju = "Chrysanthemum",
-    custom = "Custom layout",
-    random = "Random style",
-}
+local FOLIO_SCENE_LABELS = Config.FOLIO_SCENE_LABELS
 
 local SCENE_MODES = {
     "off",
@@ -105,7 +83,7 @@ function FolioScenesSettings.items(ctx)
             callback = function(touchmenu_instance)
                 local config = getConfig(ui)
                 config.folio_scene = scene_mode
-                applyStyle(config)
+                applyStyle(config, { preview = false })
                 if touchmenu_instance then touchmenu_instance:updateItems() end
                 if scene_mode ~= "off" then
                     UIManager:broadcastEvent(Event:new("ShowReadingFolio"))
@@ -124,7 +102,7 @@ function FolioScenesSettings.items(ctx)
             callback = function(touchmenu_instance)
                 local config = getConfig(ui)
                 config.folio_scene = style_mode
-                applyStyle(config)
+                applyStyle(config, { preview = false })
                 if touchmenu_instance then
                     if touchmenu_instance.updateItems then
                         touchmenu_instance:updateItems()

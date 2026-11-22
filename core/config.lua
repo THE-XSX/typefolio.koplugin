@@ -9,6 +9,14 @@ local Config = {
     SCHEMA_VERSION = 8,
 }
 
+local function toSet(list)
+    local set = {}
+    for _, v in ipairs(list) do
+        set[v] = true
+    end
+    return set
+end
+
 -- Status bar (custom header / custom footer) vocabularies.
 -- SINGLE SOURCE OF TRUTH. Config.normalize, css/preset_codec.lua,
 -- settings/custom_header.lua, settings/custom_footer.lua and
@@ -27,8 +35,7 @@ Config.STATUS_PRESETS = {
     "wechat_reading", "minimal_pages", "modern_full", "custom",
 }
 Config.STATUS_DIVIDERS = {
-    "none", "solid", "dashed", "dots_small", "dots_big",
-    "vertical_bar", "slash", "double_slash", "progress_bar", "custom",
+    "none", "solid", "dashed", "dots_small", "progress_bar", "custom",
 }
 -- One font-size range for both bars, shared with the importer and the spin widgets.
 Config.STATUS_FONT_MIN = 8
@@ -54,6 +61,53 @@ Config.STATUS_PADDING_MAX = 30
 -- silently discarded. That is the divider-thickness bug; see the note above it.
 Config.DIALOGUE_INSET_MAX = 8
 
+-- Emphasis dots (着重号) unscaled geometry bounds, shared by normalize(), preset_codec
+-- and the emphasis submenu spin widgets.
+Config.EMPHASIS_SIZE_MIN = 1
+Config.EMPHASIS_SIZE_MAX = 6
+Config.EMPHASIS_GAP_MIN = 4
+Config.EMPHASIS_GAP_MAX = 32
+
+-- Chapter boundary decoration vocabularies and numeric bounds.
+Config.CHAPTER_STYLES = { "single", "double", "dots", "custom" }
+Config.CHAPTER_THICKNESS_MAX = 5
+Config.CHAPTER_COUNT_MAX = 20
+
+-- Folio scenes vocabulary (SSOT for config.lua, folio_scene.lua, preset_codec.lua,
+-- main.lua, and settings/folio_scenes.lua).
+Config.FOLIO_SCENES = {
+    "off", "auto", "quiet", "study", "editorial", "chapter",
+    "swiss", "terminal", "quote", "ticket", "cover", "gallery",
+    "dossier", "archive", "bookpost", "architecture", "zen",
+    "mei", "lan", "zhu", "ju", "custom", "random",
+}
+Config.FOLIO_SCENE_SET = toSet(Config.FOLIO_SCENES)
+Config.FOLIO_SCENE_LABELS = {
+    off = "Off",
+    auto = "Follow typesetting automatically",
+    quiet = "Quiet reading",
+    study = "Study notes",
+    editorial = "Editorial",
+    chapter = "Chapter focus",
+    swiss = "Swiss grid",
+    terminal = "Terminal",
+    quote = "Quote poster",
+    ticket = "Ticket stub",
+    cover = "Cover first",
+    gallery = "Gallery folio",
+    dossier = "Reading dossier",
+    archive = "Library archive",
+    bookpost = "Book post",
+    architecture = "Reading architecture",
+    zen = "Japanese minimal",
+    mei = "Plum blossom",
+    lan = "Orchid",
+    zhu = "Bamboo",
+    ju = "Chrysanthemum",
+    custom = "Custom layout",
+    random = "Random style",
+}
+
 -- Slot and divider ids that older versions persisted. normalize() translates these
 -- before validating, so a config saved by an earlier build keeps the layout the reader
 -- chose instead of being reset to the defaults -- and an exported preset from that build
@@ -66,20 +120,37 @@ Config.STATUS_SLOT_ALIASES = {
     pages_left_in_chapter = "pages_left_chapter",
 }
 Config.STATUS_DIVIDER_ALIASES = {
-    bars = "vertical_bar",
-    slashes = "slash",
-    double_slashes = "double_slash",
+    bars = "solid",
+    vertical_bar = "solid",
+    slash = "dashed",
+    slashes = "dashed",
+    double_slash = "dashed",
+    double_slashes = "dashed",
+    dots_big = "dots_small",
 }
 
-local FOLIO_SCENES = {
-    off = true, auto = true, quiet = true, study = true,
-    editorial = true, chapter = true,
-    swiss = true, terminal = true, quote = true, ticket = true,
-    cover = true, gallery = true, dossier = true, archive = true,
-    bookpost = true, architecture = true, zen = true,
-    mei = true, lan = true, zhu = true, ju = true,
-    custom = true, random = true,
+-- Legacy underline ids -> canonical { underline, dash_pattern }. Shared with
+-- painters/painter.lua and css/css_templates.lua so aliases never drift.
+Config.UNDERLINE_ALIASES = {
+    all_lines_dashed_compat = { underline = "all_lines", dash_pattern = "normal" },
+    all_lines_dashed = { underline = "all_lines", dash_pattern = "normal" },
+    all_lines_solid = { underline = "all_lines", dash_pattern = "solid" },
+    all_lines_dotted = { underline = "all_lines", dash_pattern = "dense" },
+    thick_lines = { underline = "all_lines", dash_pattern = "thick" },
+    para_dashed = { underline = "para", dash_pattern = "normal" },
+    para_dotted = { underline = "para", dash_pattern = "dense" },
 }
+
+-- Prebuilt O(1) lookup sets so Config.normalize() allocates zero temporary tables
+-- per validation check.
+local STATUS_SLOT_SET = toSet(Config.STATUS_SLOTS)
+local STATUS_PRESET_SET = toSet(Config.STATUS_PRESETS)
+local STATUS_DIVIDER_SET = toSet(Config.STATUS_DIVIDERS)
+local DIVIDER_POSITION_SET = toSet({ "auto", "above", "below" })
+local DIALOGUE_MODE_SET = toSet({ "tint", "underline", "side_bar" })
+local DIALOGUE_LANG_SET = toSet({ "cn", "en", "all" })
+local TINT_LEVEL_SET = toSet({ "light", "medium", "strong" })
+local CHAPTER_STYLE_SET = toSet(Config.CHAPTER_STYLES)
 
 local AWARENESS_DEFAULTS = {
     chapter = {
@@ -162,16 +233,6 @@ local CUSTOM_FOOTER_DEFAULTS = {
     font_italic = false,
 }
 
-local UNDERLINE_ALIASES = {
-    all_lines_dashed_compat = { underline = "all_lines", dash_pattern = "normal" },
-    all_lines_dashed = { underline = "all_lines", dash_pattern = "normal" },
-    all_lines_solid = { underline = "all_lines", dash_pattern = "solid" },
-    all_lines_dotted = { underline = "all_lines", dash_pattern = "dense" },
-    thick_lines = { underline = "all_lines", dash_pattern = "thick" },
-    para_dashed = { underline = "para", dash_pattern = "normal" },
-    para_dotted = { underline = "para", dash_pattern = "dense" },
-}
-
 local function clone(value, seen)
     if type(value) ~= "table" then return value end
     seen = seen or {}
@@ -182,13 +243,6 @@ local function clone(value, seen)
         copy[clone(key, seen)] = clone(child, seen)
     end
     return copy
-end
-
-local function oneOf(value, allowed)
-    for _, candidate in ipairs(allowed) do
-        if value == candidate then return true end
-    end
-    return false
 end
 
 local function booleanOr(value, default)
@@ -202,8 +256,16 @@ local function thicknessOr(value, default)
 end
 
 local function boundaryThicknessOr(value, default)
-    return type(value) == "number" and value % 1 == 0 and value >= 1 and value <= 5
+    return type(value) == "number" and value % 1 == 0
+        and value >= 1 and value <= Config.CHAPTER_THICKNESS_MAX
         and value or default
+end
+
+local function clampedIntOr(value, min_val, max_val, default)
+    if type(value) ~= "number" or value ~= value or value % 1 ~= 0 then return default end
+    if value < min_val then return min_val end
+    if value > max_val then return max_val end
+    return value
 end
 
 -- A status bar divider thickness above the range is clamped, not reset: a reader who
@@ -216,10 +278,20 @@ end
 
 -- Legacy id -> current id, for a value that is about to be validated against one of the
 -- Config.STATUS_* vocabularies. An unknown value is returned untouched so the caller's
--- own oneOf() check still decides.
+-- own lookup check still decides.
 local function canonical(value, aliases)
     if type(value) ~= "string" then return value end
     return aliases[value] or value
+end
+
+-- Sanitizes a user/imported font-family name before it ever reaches CSS.
+-- Rejects any payload containing control characters or CSS delimiter/injection characters.
+function Config.sanitizeFontFamily(value)
+    if type(value) ~= "string" then return "" end
+    local trimmed = value:gsub("^%s+", ""):gsub("%s+$", "")
+    if trimmed == "" or #trimmed > 120 then return "" end
+    if trimmed:find("[%c;{}\"'\\:<>]") then return "" end
+    return trimmed
 end
 
 function Config.defaults()
@@ -233,6 +305,7 @@ function Config.defaults()
         skip_headings = true,
         skip_blockquotes = true,
         folio_scene = "off",
+        disable_system_bars = false,
         awareness = clone(AWARENESS_DEFAULTS),
         semantic_drawing = clone(SEMANTIC_DEFAULTS),
         dialogue_painter = clone(DIALOGUE_PAINTER_DEFAULTS),
@@ -274,15 +347,40 @@ function Config.normalize(value)
         end
         bq_params.bg_tint = nil
     end
+    local dlg_params = config.tweak_params.dialogue_style
+    if type(dlg_params) == "table" then
+        if dlg_params.font_family ~= nil then
+            dlg_params.font_family = Config.sanitizeFontFamily(dlg_params.font_family)
+        end
+        if dlg_params.font_scale ~= nil then
+            dlg_params.font_scale = clampedIntOr(dlg_params.font_scale, 70, 150, 100)
+        end
+        if dlg_params.text_depth ~= nil then
+            dlg_params.text_depth = clampedIntOr(dlg_params.text_depth, 40, 100, 100)
+        end
+        if dlg_params.font_weight ~= nil then
+            local valid_weights = { ["default"] = true, ["300"] = true, ["normal"] = true, ["600"] = true, ["bold"] = true, ["900"] = true }
+            if not valid_weights[tostring(dlg_params.font_weight)] then
+                dlg_params.font_weight = "default"
+            else
+                dlg_params.font_weight = tostring(dlg_params.font_weight)
+            end
+        end
+        if dlg_params.include_quotes ~= nil then
+            dlg_params.include_quotes = booleanOr(dlg_params.include_quotes, true)
+        end
+    end
     if config.skip_headings == nil then config.skip_headings = true end
     if config.skip_blockquotes == nil then config.skip_blockquotes = true end
-    config.folio_scene = FOLIO_SCENES[config.folio_scene] and config.folio_scene or "off"
+    config.folio_scene = Config.FOLIO_SCENE_SET[config.folio_scene] and config.folio_scene or "off"
+    config.disable_system_bars = booleanOr(config.disable_system_bars, false)
+
     local semantic_source = type(config.semantic_drawing) == "table"
         and config.semantic_drawing or {}
     config.semantic_drawing = {}
     for key, default in pairs(SEMANTIC_DEFAULTS) do
-        local value = semantic_source[key]
-        config.semantic_drawing[key] = value == nil and default or value
+        local val = semantic_source[key]
+        config.semantic_drawing[key] = val == nil and default or val
     end
     local semantic = config.semantic_drawing
     semantic.enabled = booleanOr(semantic.enabled, false)
@@ -296,16 +394,15 @@ function Config.normalize(value)
         and config.dialogue_painter or {}
     config.dialogue_painter = {}
     for key, default in pairs(DIALOGUE_PAINTER_DEFAULTS) do
-        local value = dp_source[key]
-        config.dialogue_painter[key] = value == nil and default or value
+        local val = dp_source[key]
+        config.dialogue_painter[key] = val == nil and default or val
     end
     local dp = config.dialogue_painter
     dp.enabled = booleanOr(dp.enabled, false)
-    dp.mode = oneOf(dp.mode, { "tint", "underline", "side_bar" }) and dp.mode or "tint"
-    dp.lang = oneOf(dp.lang, { "cn", "en", "all" }) and dp.lang or "all"
+    dp.mode = DIALOGUE_MODE_SET[dp.mode] and dp.mode or "tint"
+    dp.lang = DIALOGUE_LANG_SET[dp.lang] and dp.lang or "all"
     dp.thickness = thicknessOr(dp.thickness, 1)
-    dp.tint_level = oneOf(dp.tint_level, { "light", "medium", "strong" })
-        and dp.tint_level or "light"
+    dp.tint_level = TINT_LEVEL_SET[dp.tint_level] and dp.tint_level or "light"
     -- Clamped rather than reset, for the reason spelled out at dividerThicknessOr: a value
     -- saved by a build whose spin row went higher should give the largest inset that exists,
     -- not snap back to zero and look like the setting was ignored.
@@ -317,13 +414,14 @@ function Config.normalize(value)
         and config.emphasis_painter or {}
     config.emphasis_painter = {}
     for key, default in pairs(EMPHASIS_PAINTER_DEFAULTS) do
-        local value = ep_source[key]
-        config.emphasis_painter[key] = value == nil and default or value
+        local val = ep_source[key]
+        config.emphasis_painter[key] = val == nil and default or val
     end
     local ep = config.emphasis_painter
     ep.enabled = booleanOr(ep.enabled, false)
-    ep.size = thicknessOr(ep.size, 2)
-    ep.gap = type(ep.gap) == "number" and ep.gap or 12
+    ep.size = clampedIntOr(ep.size, Config.EMPHASIS_SIZE_MIN, Config.EMPHASIS_SIZE_MAX, 2)
+    ep.gap = clampedIntOr(ep.gap, Config.EMPHASIS_GAP_MIN, Config.EMPHASIS_GAP_MAX, 12)
+
     config.awareness = type(config.awareness) == "table" and config.awareness or {}
     local chapter_source = type(config.awareness.chapter) == "table"
         and config.awareness.chapter or {}
@@ -333,13 +431,13 @@ function Config.normalize(value)
         source = type(source) == "table" and source or {}
         return {
             enabled = booleanOr(source.enabled, enabled_default),
-            style = oneOf(source.style, { "single", "double", "wave", "dots", "heart", "custom" })
-                and source.style or "single",
+            style = CHAPTER_STYLE_SET[source.style] and source.style or "single",
             thickness = boundaryThicknessOr(source.thickness, 1),
             char = type(source.char) == "string" and source.char ~= ""
                 and source.char or nil,
             count = type(source.count) == "number" and source.count % 1 == 0
-                and source.count >= 1 and source.count <= 20 and source.count or nil,
+                and source.count >= 1 and source.count <= Config.CHAPTER_COUNT_MAX
+                and source.count or nil,
         }
     end
     if has_boundary_config then
@@ -363,10 +461,6 @@ function Config.normalize(value)
         }
     end
 
-    local valid_slots = Config.STATUS_SLOTS
-    local valid_presets = Config.STATUS_PRESETS
-    local valid_dividers = Config.STATUS_DIVIDERS
-
     -- Custom reading header normalization
     local header_source = type(config.custom_header) == "table"
         and config.custom_header or {}
@@ -377,13 +471,13 @@ function Config.normalize(value)
     end
     local ch = config.custom_header
     ch.enabled = booleanOr(ch.enabled, false)
-    ch.preset = oneOf(ch.preset, valid_presets) and ch.preset or "modern"
+    ch.preset = STATUS_PRESET_SET[ch.preset] and ch.preset or "modern"
     ch.left = canonical(ch.left, Config.STATUS_SLOT_ALIASES)
     ch.center = canonical(ch.center, Config.STATUS_SLOT_ALIASES)
     ch.right = canonical(ch.right, Config.STATUS_SLOT_ALIASES)
-    ch.left = oneOf(ch.left, valid_slots) and ch.left or "chapter_title"
-    ch.center = oneOf(ch.center, valid_slots) and ch.center or "none"
-    ch.right = oneOf(ch.right, valid_slots) and ch.right or "time_battery"
+    ch.left = STATUS_SLOT_SET[ch.left] and ch.left or "chapter_title"
+    ch.center = STATUS_SLOT_SET[ch.center] and ch.center or "none"
+    ch.right = STATUS_SLOT_SET[ch.right] and ch.right or "time_battery"
     ch.custom_text = type(ch.custom_text) == "string" and ch.custom_text or ""
     ch.font_size = (type(ch.font_size) == "number"
         and ch.font_size >= Config.STATUS_FONT_MIN and ch.font_size <= Config.STATUS_FONT_MAX)
@@ -391,8 +485,8 @@ function Config.normalize(value)
     ch.font_bold = booleanOr(ch.font_bold, false)
     ch.font_italic = booleanOr(ch.font_italic, false)
     ch.divider_style = canonical(ch.divider_style, Config.STATUS_DIVIDER_ALIASES)
-    ch.divider_style = oneOf(ch.divider_style, valid_dividers) and ch.divider_style or "solid"
-    ch.divider_position = oneOf(ch.divider_position, { "auto", "above", "below" })
+    ch.divider_style = STATUS_DIVIDER_SET[ch.divider_style] and ch.divider_style or "solid"
+    ch.divider_position = DIVIDER_POSITION_SET[ch.divider_position]
         and ch.divider_position or "auto"
     ch.divider_thickness = dividerThicknessOr(ch.divider_thickness, 1)
     ch.divider_custom_char = type(ch.divider_custom_char) == "string" and ch.divider_custom_char ~= ""
@@ -418,13 +512,13 @@ function Config.normalize(value)
     end
     local cf = config.custom_footer
     cf.enabled = booleanOr(cf.enabled, false)
-    cf.preset = oneOf(cf.preset, valid_presets) and cf.preset or "wechat_duokan"
+    cf.preset = STATUS_PRESET_SET[cf.preset] and cf.preset or "wechat_duokan"
     cf.left = canonical(cf.left, Config.STATUS_SLOT_ALIASES)
     cf.center = canonical(cf.center, Config.STATUS_SLOT_ALIASES)
     cf.right = canonical(cf.right, Config.STATUS_SLOT_ALIASES)
-    cf.left = oneOf(cf.left, valid_slots) and cf.left or "time_left_chapter"
-    cf.center = oneOf(cf.center, valid_slots) and cf.center or "none"
-    cf.right = oneOf(cf.right, valid_slots) and cf.right or "reading_percent"
+    cf.left = STATUS_SLOT_SET[cf.left] and cf.left or "time_left_chapter"
+    cf.center = STATUS_SLOT_SET[cf.center] and cf.center or "none"
+    cf.right = STATUS_SLOT_SET[cf.right] and cf.right or "reading_percent"
     cf.custom_text = type(cf.custom_text) == "string" and cf.custom_text or ""
     cf.font_size = (type(cf.font_size) == "number"
         and cf.font_size >= Config.STATUS_FONT_MIN and cf.font_size <= Config.STATUS_FONT_MAX)
@@ -432,8 +526,8 @@ function Config.normalize(value)
     cf.font_bold = booleanOr(cf.font_bold, false)
     cf.font_italic = booleanOr(cf.font_italic, false)
     cf.divider_style = canonical(cf.divider_style, Config.STATUS_DIVIDER_ALIASES)
-    cf.divider_style = oneOf(cf.divider_style, valid_dividers) and cf.divider_style or "none"
-    cf.divider_position = oneOf(cf.divider_position, { "auto", "above", "below" })
+    cf.divider_style = STATUS_DIVIDER_SET[cf.divider_style] and cf.divider_style or "none"
+    cf.divider_position = DIVIDER_POSITION_SET[cf.divider_position]
         and cf.divider_position or "auto"
     -- Kobo's native footer places its progress track below the centered book/page
     -- label. Apply this to older saved configs too, which predate divider_position.
@@ -455,7 +549,7 @@ function Config.normalize(value)
     cf.facing_pages = booleanOr(cf.facing_pages, false)
     cf.margin_inset = booleanOr(cf.margin_inset, true)
 
-    local alias = UNDERLINE_ALIASES[config.underline]
+    local alias = Config.UNDERLINE_ALIASES[config.underline]
     if alias then
         config.underline = alias.underline
         config.dash_pattern = alias.dash_pattern

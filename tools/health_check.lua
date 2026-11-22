@@ -157,15 +157,17 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "info",
             badge = "【i】 Non-standard Markup",
             desc = "No clear heading tags or centered title markers detected in TOC samples.",
-            action1 = "Add custom class selector under Semantic Settings.",
+            action1 = "Use 'Typesetting tools → Selector helper' to inspect title markup, or enable Semantic drawing.",
             action2 = "See the heading regex in the Calibre guide below.",
         })
     end
 
     -- 2. Dialogue Highlighting
-    local has_dialogue_class = combined_html:find("class=\"[^\"]*dialogue[^\"]*\"") ~= nil
+    local has_dialogue_class = combined_html:find("class=\"[^\"]*tf%-dlg[^\"]*\"") ~= nil
+        or combined_html:find("class=\"[^\"]*dialogue[^\"]*\"") ~= nil
         or combined_html:find("class=\"[^\"]*dialog[^\"]*\"") ~= nil
         or combined_html:find("class=\"[^\"]*speech[^\"]*\"") ~= nil
+        or combined_html:find("class=\"[^\"]*quote%-text[^\"]*\"") ~= nil
         or combined_html:find("class=\"[^\"]*dlg[^\"]*\"") ~= nil
     local has_quotes = combined_html:find("“") ~= nil or combined_html:find("「") ~= nil or combined_html:find("\"") ~= nil
 
@@ -174,8 +176,8 @@ function HealthCheck.run(snapshot, config, ui, perf)
             name = "Dialogue highlighting",
             status = "ok",
             badge = "【✔】 Class Markup Found",
-            desc = "Detected .dialogue / .dialog classes in HTML.",
-            action1 = "Enable Dialogue Highlighting (Class mode).",
+            desc = "Detected .tf-dlg / .dialogue / .dialog classes in HTML.",
+            action1 = "Enable Dialogue Highlighting (Class mode) and optional dialogue font.",
             action2 = "Class markup already present in EPUB.",
         })
     elseif has_quotes then
@@ -184,7 +186,7 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "ok",
             badge = "【✔】 Dynamic Detection Ready",
             desc = "No dialogue class found, but quote marks were detected.",
-            action1 = "Enable 'Dynamic quotes detection' (no EPUB modification required).",
+            action1 = "Enable 'Dynamic quotes detection', or generate a dialogue-tagged copy under Text styling → Dialogue to switch dialogue fonts.",
             action2 = "See the dialogue regex in the Calibre guide below.",
         })
     else
@@ -218,7 +220,7 @@ function HealthCheck.run(snapshot, config, ui, perf)
             status = "info",
             badge = "【i】 No Blockquote Found",
             desc = "No standard <blockquote> elements detected in sampled chapters.",
-            action1 = "Add custom quote class under Semantic Settings if present.",
+            action1 = "Use 'Typesetting tools → Selector helper' to inspect quote blocks if present.",
             action2 = "See the blockquote regex in the Calibre guide below.",
         })
     end

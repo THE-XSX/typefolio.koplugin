@@ -15,7 +15,8 @@ local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])painters[/\\]") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
 
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local StatusBarHelper = dofile(PLUGIN_ROOT .. "painters/status_bar_helper.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local StatusBarHelper = ModuleLoader.load(PLUGIN_ROOT, "painters/status_bar_helper.lua")
 
 local HeaderPainter = WidgetContainer:extend{
     enabled = false,
@@ -29,10 +30,13 @@ function HeaderPainter:setConfig(config)
     self.config = config or {}
     self.header_config = self.config.custom_header or {}
     self.enabled = self.header_config.enabled == true
-    self:invalidate()
+    self:invalidate("config_apply")
 end
 
 function HeaderPainter:invalidate(reason)
+    if reason == "page_update" or reason == "pos_update" then
+        return
+    end
     if self.helper then
         self.helper:invalidateTocCache()
     end
@@ -54,12 +58,13 @@ function HeaderPainter:paintTo(bb, x, y)
     end
 
     local page_info = snapshot.page or {}
-    local page_count = 1
-    if self.ui and self.ui.document then
+    local page_count = page_info.page_count
+    if not page_count and self.ui and self.ui.document then
         page_count = StatusBarHelper.safeCall(function()
             return self.ui.document:getPageCount()
-        end) or 1
+        end)
     end
+    page_count = page_count or 1
 
     self.helper:paintBar(bb, {
         position = "top",
@@ -68,6 +73,7 @@ function HeaderPainter:paintTo(bb, x, y)
         book_context = self.context,
         page_num = page_info.number or 1,
         page_count = page_count,
+        tr = self.tr,
     })
 end
 

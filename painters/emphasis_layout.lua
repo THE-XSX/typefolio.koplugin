@@ -30,6 +30,13 @@
 -- When geometry cannot be resolved -- no resolver, or the engine cannot place the
 -- offsets -- a partial run is left unmarked. Dotting the whole line instead would put
 -- the mark under narration, which is worse than an absent mark.
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)painters[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local TextNodes = ModuleLoader.load(PLUGIN_ROOT, "core/text_nodes.lua")
+
 local EmphasisLayout = {}
 
 -- Matched by tag name only: a bare "<i" also hits <img>, "<u" hits <ul>, "<b" hits
@@ -165,7 +172,14 @@ local function groupByElement(nodes)
     for index, sample in ipairs(nodes or {}) do
         if sample.box then
             local pointer = sample.pos0 or sample.xpointer
-            local key = type(pointer) == "string" and pointer:match("^(.*)%.%d+$") or nil
+            local key
+            if type(pointer) == "string" then
+                -- Key by block element path (e.g. /body/p[5]) rather than text-node path
+                -- (e.g. /body/p[5]/em[1]/text()): inline emphasis tags always split a
+                -- paragraph into multiple text nodes, and splitting groups caused duplicate
+                -- resolver calls and dropped valid run boxes in onOwnLine().
+                key = TextNodes.blockPath(pointer) or pointer:match("^(.*)%.%d+$")
+            end
             -- No pointer means nothing links this node to its neighbours; keep it alone
             -- rather than merging unrelated nodes under one key.
             local group = key and groups[key]

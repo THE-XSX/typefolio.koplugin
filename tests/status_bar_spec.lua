@@ -398,10 +398,12 @@ end
 
 do
     local combined = StatusBarMenu.combinedItems({ tr = function(s) return s end })
-    check("header and footer share one top-level submenu", #combined == 3)
+    check("header and footer share one top-level submenu", #combined == 4)
     check("the shared submenu lists presets once", combined[1].text == "Layout presets")
     check("the shared submenu keeps a header detail menu", combined[2].text == "Custom top header")
     check("the shared submenu keeps a footer detail menu", combined[3].text == "Custom bottom footer")
+    check("the shared submenu has disable system bars toggle",
+        type(combined[4].text_func) == "function" and combined[4].help_text ~= nil)
 end
 
 do
@@ -501,7 +503,8 @@ check("unknown divider position falls back to auto",
     Config.normalize{ custom_footer = { divider_position = "sideways" } }
         .custom_footer.divider_position == "auto")
 for _, pair in ipairs({
-    { "bars", "vertical_bar" }, { "slashes", "slash" }, { "double_slashes", "double_slash" },
+    { "bars", "solid" }, { "slashes", "dashed" }, { "double_slashes", "dashed" },
+    { "dots_big", "dots_small" }, { "vertical_bar", "solid" }, { "slash", "dashed" },
 }) do
     check("legacy divider id " .. pair[1] .. " maps to " .. pair[2],
         StatusBarHelper.canonicalDivider(pair[1]) == pair[2]

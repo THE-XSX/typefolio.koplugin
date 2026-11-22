@@ -28,9 +28,7 @@ function ChapterSettings.boundaryStyleItems(ctx, boundary)
     local options = {
         { key = "single", text = tr("Single rule") },
         { key = "double", text = tr("Double rule") },
-        { key = "wave", text = tr("Wave line") },
         { key = "dots", text = tr("Thick dots") },
-        { key = "heart", text = tr("Heart symbol") },
         { key = "custom", text = tr("Custom character") },
     }
     for _, option in ipairs(options) do
@@ -131,7 +129,7 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
                     title_text = tr("Decoration count"),
                     value = tonumber(getChapterBoundary(ctx, boundary, "count")) or 5,
                     value_min = 1,
-                    value_max = 20,
+                    value_max = (ctx.Config and ctx.Config.CHAPTER_COUNT_MAX) or 20,
                     value_step = 1,
                     value_hold_step = 2,
                     default_value = 5,
@@ -157,7 +155,7 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
                     title_text = T(tr("%1 thickness"), tr(title)),
                     value = getChapterBoundary(ctx, boundary, "thickness"),
                     value_min = 1,
-                    value_max = 5,
+                    value_max = (ctx.Config and ctx.Config.CHAPTER_THICKNESS_MAX) or 5,
                     value_step = 1,
                     value_hold_step = 1,
                     default_value = 1,

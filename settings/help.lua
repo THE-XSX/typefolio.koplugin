@@ -45,8 +45,6 @@ function HelpSettings.subItems(ctx)
                 local help_lines = {
                     tr("HELP_TITLE"),
                     "",
-                    tr("HELP_HEALTH_CHECK"),
-                    "",
                     tr("HELP_RENDERING"),
                     "",
                     tr("HELP_PAINT_LIMITS"),
@@ -62,14 +60,6 @@ function HelpSettings.subItems(ctx)
                     tr("HELP_PURE_BLACK"),
                 }
                 showInfo(table.concat(help_lines, "\n"))
-            end,
-        },
-        {
-            text = tr("Calibre regex guide"),
-            keep_menu_open = true,
-            callback = function()
-                showInfo(table.concat(
-                    HelpSettings.calibreRegexLines(tr, true), "\n"))
             end,
         },
         {

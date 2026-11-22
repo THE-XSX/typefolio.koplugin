@@ -41,11 +41,12 @@ function TextMarksSettings.renderModeItems(ctx)
     end
     items[#items].separator = true
 
+    local readConfig = ctx.getReadonlyConfig or getConfig
+
     table.insert(items, {
         text = tr("Skip headings and centered text"),
         keep_menu_open = true,
-        enabled_func = function() return getRenderPolicy() ~= "css" end,
-        checked_func = function() return getConfig(ui).skip_headings ~= false end,
+        checked_func = function() return readConfig(ui).skip_headings ~= false end,
         callback = function(touchmenu_instance)
             local config = getConfig(ui)
             config.skip_headings = config.skip_headings == false
@@ -57,8 +58,7 @@ function TextMarksSettings.renderModeItems(ctx)
     table.insert(items, {
         text = tr("Skip blockquotes"),
         keep_menu_open = true,
-        enabled_func = function() return getRenderPolicy() ~= "css" end,
-        checked_func = function() return getConfig(ui).skip_blockquotes ~= false end,
+        checked_func = function() return readConfig(ui).skip_blockquotes ~= false end,
         callback = function(touchmenu_instance)
             local config = getConfig(ui)
             config.skip_blockquotes = config.skip_blockquotes == false
@@ -131,7 +131,6 @@ function TextMarksSettings.underlineItems(ctx)
         { key = "all_lines", text = tr("Underline every line") },
         { key = "para", text = tr("Underline paragraph bottoms") },
         { key = "em_only", text = tr("Underline emphasized words only") },
-        { key = "marker", text = tr("Highlighter background") },
     }
     local items = {}
     for _, option in ipairs(options) do
@@ -223,7 +222,6 @@ function TextMarksSettings.items(ctx)
         { text = tr("Mark type"), sub_item_table = TextMarksSettings.underlineItems(ctx) },
         { text = tr("Stroke style"), sub_item_table = TextMarksSettings.strokeItems(ctx) },
         { text = tr("Line thickness"), sub_item_table = TextMarksSettings.thicknessItems(ctx) },
-        { text = tr("Rendering"), sub_item_table = TextMarksSettings.renderModeItems(ctx) },
     }
 end
 

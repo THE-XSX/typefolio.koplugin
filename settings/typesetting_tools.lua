@@ -9,9 +9,11 @@
 -- Typesetting tools: Health check, Selector helper, Semantic drawing, Dialogue/Emphasis painters
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])settings[/\\]") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
-local HealthCheck = dofile(PLUGIN_ROOT .. "tools/health_check.lua")
-local HelpSettings = dofile(PLUGIN_ROOT .. "settings/help.lua")
-local SelectorHelper = dofile(PLUGIN_ROOT .. "tools/selector_helper.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local HealthCheck = ModuleLoader.load(PLUGIN_ROOT, "tools/health_check.lua")
+local HelpSettings = ModuleLoader.load(PLUGIN_ROOT, "settings/help.lua")
+local SelectorHelper = ModuleLoader.load(PLUGIN_ROOT, "tools/selector_helper.lua")
+local TweakMenus = ModuleLoader.load(PLUGIN_ROOT, "settings/tweak_menus.lua")
 local SpinWidget = require("ui/widget/spinwidget")
 local TextViewer = require("ui/widget/textviewer")
 local UIManager = require("ui/uimanager")
@@ -297,10 +299,11 @@ function TypesettingToolsSettings.items(ctx)
             text = tr("Emphasis dots painter"),
             keep_menu_open = true,
             checked_func = function() return getEmphasisPainter(ctx, "enabled") == true end,
-            callback = function(touchmenu_instance)
+            checkmark_callback = function(touchmenu_instance)
                 setEmphasisPainter(ctx, "enabled", not getEmphasisPainter(ctx, "enabled"))
                 if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
+            sub_item_table_func = function() return TweakMenus.emphasisItems(ctx) end,
         },
         {
             text_func = function()

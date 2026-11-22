@@ -14,6 +14,7 @@ function Engine.new(opts)
         planner = assert(opts.planner),
         get_policy = assert(opts.get_policy),
         painter_available = assert(opts.painter_available),
+        get_capabilities = opts.get_capabilities,
         build_underline_css = assert(opts.build_underline_css),
         build_tweak_css = assert(opts.build_tweak_css),
         persist = assert(opts.persist),
@@ -27,7 +28,8 @@ end
 function Engine:apply(value, opts)
     opts = opts or {}
     local config = self.config.normalize(value)
-    local plan = self.planner.plan(config, self.get_policy(), self.painter_available())
+    local capabilities = type(self.get_capabilities) == "function" and self.get_capabilities() or nil
+    local plan = self.planner.plan(config, self.get_policy(), self.painter_available(), capabilities)
     local parts = {}
 
     if plan.underline_backend == "css" then
@@ -42,7 +44,7 @@ function Engine:apply(value, opts)
     if opts.persist ~= false then self.persist(config) end
     self.apply_css(css, css ~= "", css_changed)
     self.last_css = css
-    self.apply_painter(plan.painter_enabled, config)
+    self.apply_painter(plan.painter_enabled, config, plan)
     self.refresh()
 
     return {

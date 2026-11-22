@@ -12,7 +12,8 @@ local item_path = debug.getinfo(1, "S").source:sub(2)
 local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
     or item_path:match("^(.*)painters[/\\]") or item_path:match("(.*[/\\])")
     or "plugins/typefolio.koplugin/"
-local TextNodes = dofile(PLUGIN_ROOT .. "core/text_nodes.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local TextNodes = ModuleLoader.load(PLUGIN_ROOT, "core/text_nodes.lua")
 
 local DialogueLayout = {}
 
@@ -187,7 +188,25 @@ local function nodeText(node, nodes)
             end
         end
         if #parts > 0 then
-            return table.concat(parts, ""), origin, "node"
+            -- Insert a space across line breaks when joining ASCII/Latin word boundaries
+            -- (e.g. English multiline quotes wrapped across screen lines), while keeping
+            -- CJK lines concatenated directly so character offsets match crengine's text node.
+            local stitched = { parts[1] }
+            for i = 2, #parts do
+                local prev = parts[i - 1]
+                local curr = parts[i]
+                local prev_byte = prev:byte(#prev)
+                local curr_byte = curr:byte(1)
+                local ascii_boundary = prev_byte and curr_byte
+                    and prev_byte < 128 and curr_byte < 128
+                    and not prev:match("%s$") and not curr:match("^%s")
+                    and not prev:match("%-$")
+                if ascii_boundary then
+                    table.insert(stitched, " ")
+                end
+                table.insert(stitched, curr)
+            end
+            return table.concat(stitched, ""), origin, "node"
         end
     end
     if type(node.screen_text) == "string" and node.screen_text ~= "" then
@@ -203,7 +222,7 @@ end
 -- exclude text keeps the failure direction safe: an unlisted character means "consult the
 -- engine", never "cover the row".
 local OUTSIDE_QUOTE_OK = {}
-for char in ([[。，、！？；：…‥·．～—–‐ー・「」『』（）〔〕【】《》〈〉""''"'.,!?;:~-()[]{}]])
+for char in ([[。，、！？；：…‥·．～—–‐ー・「」『』（）〔〕【】《》〈〉“”‘’"'.,!?;:~-()[]{}]])
     :gmatch("[\1-\127\194-\244][\128-\191]*") do
     OUTSIDE_QUOTE_OK[char] = true
 end

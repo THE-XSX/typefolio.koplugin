@@ -27,7 +27,8 @@ local InputDialog = require("ui/widget/inputdialog")
 local SpinWidget = require("ui/widget/spinwidget")
 local UIManager = require("ui/uimanager")
 
-local Config = dofile(PLUGIN_ROOT .. "core/config.lua")
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
 
 local StatusBarMenu = {}
 
@@ -63,10 +64,6 @@ local DIVIDER_LABELS = {
     solid = "Solid line",
     dashed = "Dashed line",
     dots_small = "Small dots (· · ·)",
-    dots_big = "Big dots (● ● ●)",
-    vertical_bar = "Vertical bars (| | |)",
-    slash = "Slashes (/ / /)",
-    double_slash = "Double slashes (// // //)",
     progress_bar = "Mini reading progress bar",
     custom = "Custom symbol / pattern",
 }
@@ -174,7 +171,7 @@ local BARS = {
 }
 
 local function barConfig(ctx, bar)
-    local config = ctx.getConfig(ctx.ui)
+    local config = ctx.getReadonlyConfig and ctx.getReadonlyConfig(ctx.ui) or ctx.getConfig(ctx.ui)
     return config[bar] or {}
 end
 
@@ -386,6 +383,11 @@ local function toggleRow(ctx, bar, label, key, default_on, extra_enabled)
     }
 end
 
+local function isSystemDisabled(ctx)
+    local cfg = ctx and ctx.getConfig and ctx.getConfig(ctx.ui)
+    return cfg and cfg.disable_system_bars == true
+end
+
 -- The crengine "alt status bar" at the top of the page. 0 enables it, 1 disables it
 -- (crengine's own convention). It only exists for reflowable documents, and main.lua's
 -- applyStyle forces it off while the custom header is painting, so the row is disabled
@@ -404,15 +406,21 @@ local function nativeTopRow(ctx, bar)
     end
     return {
         text_func = function()
+            if isSystemDisabled(ctx) then
+                return T(tr("%1: %2"), tr("KOReader native top status bar"), tr("Disabled (system bars suppressed)"))
+            end
             local status = isOn() and tr("Enabled") or tr("Disabled")
             return T(tr("%1: %2"), tr("KOReader native top status bar"), status)
         end,
         keep_menu_open = true,
         enabled_func = function()
-            return configurable() ~= nil and not barOn(ctx, bar)
+            return configurable() ~= nil and not barOn(ctx, bar) and not isSystemDisabled(ctx)
         end,
-        checked_func = isOn,
+        checked_func = function()
+            return isOn() and not isSystemDisabled(ctx)
+        end,
         callback = function(touchmenu_instance)
+            if isSystemDisabled(ctx) then return end
             local conf = configurable()
             if not conf then return end
             local next_val = isOn() and 1 or 0
@@ -432,7 +440,7 @@ end
 -- through ReaderFooter:applyFooterMode + refreshFooter; the doc_settings key
 -- "footer_visible" and the methods setVisible / recalculateMargins this row used to
 -- call have never existed, so the row did nothing but redraw its own label.
-local function nativeBottomRow(ctx)
+local function nativeBottomRow(ctx, bar)
     local tr = ctx.tr
     local T = ctx.T
     local function footer()
@@ -447,13 +455,21 @@ local function nativeBottomRow(ctx)
     end
     return {
         text_func = function()
+            if isSystemDisabled(ctx) then
+                return T(tr("KOReader native bottom status bar: %1"), tr("Disabled (system bars suppressed)"))
+            end
             local status = isVisible() and tr("Visible") or tr("Hidden")
             return T(tr("KOReader native bottom status bar: %1"), status)
         end,
         keep_menu_open = true,
-        enabled_func = function() return footer() ~= nil end,
-        checked_func = isVisible,
+        enabled_func = function()
+            return footer() ~= nil and not barOn(ctx, bar) and not isSystemDisabled(ctx)
+        end,
+        checked_func = function()
+            return isVisible() and not isSystemDisabled(ctx)
+        end,
         callback = function(touchmenu_instance)
+            if isSystemDisabled(ctx) then return end
             local f = footer()
             if not f then return end
             local off = f.mode_list.off or 0
@@ -630,7 +646,7 @@ function StatusBarMenu.items(ctx, bar, options)
     if spec.native == "top" then
         table.insert(items, nativeTopRow(ctx, bar))
     else
-        table.insert(items, nativeBottomRow(ctx))
+        table.insert(items, nativeBottomRow(ctx, bar))
     end
 
     return items
@@ -640,6 +656,11 @@ end
 -- retain separate submenus for detailed top/bottom adjustments.
 function StatusBarMenu.combinedItems(ctx)
     local tr = ctx.tr
+    local T = ctx.T or function(fmt, a, b) return (fmt:gsub("%%1", tostring(a))):gsub("%%2", tostring(b)) end
+    local function isSystemBarsDisabled()
+        local cfg = ctx and ctx.getConfig and ctx.getConfig(ctx.ui)
+        return cfg and cfg.disable_system_bars == true
+    end
     return {
         {
             text = tr("Layout presets"),
@@ -661,6 +682,22 @@ function StatusBarMenu.combinedItems(ctx)
             text = tr("Custom bottom footer"),
             sub_item_table_func = function()
                 return StatusBarMenu.items(ctx, "custom_footer", { include_presets = false })
+            end,
+            separator = true,
+        },
+        {
+            text_func = function()
+                local status = isSystemBarsDisabled() and tr("Enabled") or tr("Disabled")
+                return T(tr("%1: %2"), tr("Disable system header & footer"), status)
+            end,
+            help_text = tr("Completely suppresses KOReader's native top and bottom status bars, disabling touch triggers to prevent accidental popups and reclaim full screen for reading."),
+            keep_menu_open = true,
+            checked_func = isSystemBarsDisabled,
+            callback = function(touchmenu_instance)
+                local config = ctx.getConfig(ctx.ui)
+                config.disable_system_bars = not isSystemBarsDisabled()
+                ctx.applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         },
     }

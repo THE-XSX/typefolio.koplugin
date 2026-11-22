@@ -6,7 +6,14 @@
 -- See the LICENSE file in the project root for the full license text.
 
 -- css_templates.lua
--- 集中管理自定义排版与下划线的 CSS 规则模板 (修复引用块子元素遮挡导致的底色未生效问题)
+-- 集中管理自定义排版与下划线的 CSS 规则模板
+
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)css[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
 
 local CSSTemplates = {}
 
@@ -17,6 +24,22 @@ CSSTemplates.defaults = {
     dash_pattern = "normal",
 }
 
+local function buildExcludeSelectors(skip_headings, skip_blockquotes)
+    local exclude_selectors = {}
+    if skip_headings then
+        table.insert(exclude_selectors, "h1, h2, h3, h4, h5, h6")
+        table.insert(exclude_selectors, "h1 span, h2 span, h3 span, h4 span, h5 span, h6 span")
+        table.insert(exclude_selectors, "h1 em, h1 i, h1 u, h1 mark, h2 em, h2 i, h2 u, h2 mark, h3 em, h3 i, h3 u, h3 mark")
+        table.insert(exclude_selectors, 'p[align="center"] span, p[align="CENTER"] span, p[align="centre"] span, p[align="middle"] span')
+        table.insert(exclude_selectors, ".title span, .chapter-title span, .chaptertitle span, p.center span, div.center span")
+        table.insert(exclude_selectors, 'p[style*="center"] span, p[style*="CENTER"] span')
+    end
+    if skip_blockquotes then
+        table.insert(exclude_selectors, "blockquote span, blockquote em, blockquote i, blockquote u, blockquote mark")
+    end
+    return exclude_selectors
+end
+
 -- 构建动态下划线 CSS (纯外科手术级样式，绝对不破坏原书段落首行缩进与行距)
 function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern, skip_headings, skip_blockquotes)
     thickness = thickness or "1.5px"
@@ -24,11 +47,10 @@ function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern, skip_heading
     if skip_headings == nil then skip_headings = true end
     if skip_blockquotes == nil then skip_blockquotes = true end
 
-    -- 兼容旧键名
-    if key == "all_lines_dashed_compat" or key == "all_lines_dashed" or key == "all_lines_solid" or key == "all_lines_dotted" or key == "thick_lines" then
-        key = "all_lines"
-    elseif key == "para_dashed" or key == "para_dotted" then
-        key = "para"
+    -- 兼容旧键名（统一来源：Config.UNDERLINE_ALIASES）
+    local alias = Config.UNDERLINE_ALIASES[key]
+    if alias then
+        key = alias.underline
     end
 
     -- 补全 px 单位
@@ -59,17 +81,7 @@ function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern, skip_heading
             table.insert(include_selectors, "blockquote span")
         end
 
-        local exclude_selectors = {}
-        if skip_headings then
-            table.insert(exclude_selectors, "h1 span, h2 span, h3 span, h4 span, h5 span, h6 span")
-            table.insert(exclude_selectors, "p[align=\"center\"] span, p[align=\"CENTER\"] span, p[align=\"centre\"] span, p[align=\"middle\"] span")
-            table.insert(exclude_selectors, ".title span, .chapter-title span, .chaptertitle span, .calibre13 span, p.center span, div.center span")
-            table.insert(exclude_selectors, "p[style*=\"center\"] span, p[style*=\"CENTER\"] span")
-        end
-        if skip_blockquotes then
-            table.insert(exclude_selectors, "blockquote span")
-        end
-
+        local exclude_selectors = buildExcludeSelectors(skip_headings, skip_blockquotes)
         local inc_str = table.concat(include_selectors, ", ")
         local exc_css = ""
         if #exclude_selectors > 0 then
@@ -125,21 +137,45 @@ function CSSTemplates.getUnderlineCss(key, thickness, dash_pattern, skip_heading
             }
         ]], tostring(cur_thickness), line_style)
     elseif key == "marker" then
-        return [[
+        local include_selectors = { "p span", "p em", "p i", "u", "mark" }
+        if not skip_blockquotes then
+            table.insert(include_selectors, "blockquote span")
+        end
+        local exclude_selectors = buildExcludeSelectors(skip_headings, skip_blockquotes)
+        local exc_css = ""
+        if #exclude_selectors > 0 then
+            exc_css = string.format([[
+            %s {
+                background-color: transparent !important;
+            }
+            ]], table.concat(exclude_selectors, ",\n"))
+        end
+        return string.format([[
             /* 全局文字荧光笔高亮背景 */
-            p span, p em, p i, u, mark {
+            %s {
                 text-decoration: none !important;
                 background-color: rgba(0, 0, 0, 0.12) !important;
             }
-        ]]
+            %s
+        ]], table.concat(include_selectors, ", "), exc_css)
     end
     return ""
 end
 
--- 高级排版特效库 (修复引用块子元素遮挡导致的底色未生效问题)
+-- 高级排版特效库
 -- 每个特效是 function(params) -> css；params 缺省时由各自的 defaults 兜底。
 CSSTemplates.tweak_defaults = {
-    dialogue_style = { tint = true, tint_level = "light", bold = false, italic = false },
+    dialogue_style = {
+        tint = true,
+        tint_level = "light",
+        bold = false,
+        italic = false,
+        font_family = "",
+        font_scale = 100,
+        text_depth = 100,
+        font_weight = "default",
+        include_quotes = true,
+    },
     header_border = { border = "both", line_style = "solid", thickness = 1, centered = true,
         include_centered = true },
     chapter_pagebreak = { include_centered = true },
@@ -156,6 +192,7 @@ CSSTemplates.tweak_options = {
     line_style = { "solid", "dashed", "dotted" },
     border = { "both", "bottom", "top", "none" },
     tint = { "none", "light", "medium" },
+    font_weight = { "default", "300", "normal", "600", "bold", "900" },
 }
 
 local TINT_COLORS = { none = nil, light = "#e0e0e0", medium = "#c8c8c8" }
@@ -199,6 +236,10 @@ CSSTemplates.layout_tweaks = {
         local italic = params and params.italic
         if italic == nil then italic = defaults.italic end
         local tint_level = (params and params.tint_level) or defaults.tint_level
+        local font_family = Config.sanitizeFontFamily(params and params.font_family or defaults.font_family)
+        local font_scale = (params and tonumber(params.font_scale)) or defaults.font_scale
+        local text_depth = (params and tonumber(params.text_depth)) or defaults.text_depth
+        local font_weight = (params and params.font_weight) or defaults.font_weight
 
         local tint_colors = {
             light  = "rgba(0, 0, 0, 0.08)",
@@ -206,21 +247,44 @@ CSSTemplates.layout_tweaks = {
             strong = "rgba(0, 0, 0, 0.25)",
         }
 
-        local weight = bold and "bold" or "normal"
-        local style  = italic and "italic" or "normal"
-        local bg     = tint and tint_colors[tint_level] or "transparent"
+        -- Emit only declarations that are actively requested so e.g. switching dialogue
+        -- font alone does not forcibly reset nested <em>/<strong> or add unwanted padding.
+        local decls = {}
+        if font_family ~= "" then
+            -- Single chosen family + generic fallback: avoids long CJK fallback chains
+            -- that would load multiple heavy font files into e-ink RAM.
+            table.insert(decls, string.format('font-family: "%s", serif !important;', font_family))
+        end
+        if font_scale and font_scale >= 70 and font_scale <= 150 and font_scale ~= 100 then
+            table.insert(decls, string.format("font-size: %d%% !important;", math.floor(font_scale + 0.5)))
+        end
+        if text_depth and text_depth >= 40 and text_depth < 100 then
+            local gray_byte = math.floor((100 - text_depth) * 2.55 + 0.5)
+            table.insert(decls, string.format("color: #%02x%02x%02x !important;", gray_byte, gray_byte, gray_byte))
+        end
+        if font_weight and font_weight ~= "default" then
+            table.insert(decls, string.format("font-weight: %s !important;", font_weight))
+        elseif bold then
+            table.insert(decls, "font-weight: bold !important;")
+        end
+        if italic then
+            table.insert(decls, "font-style: italic !important;")
+        end
+        if tint then
+            local bg = tint_colors[tint_level] or tint_colors.light
+            table.insert(decls, string.format("background-color: %s !important;", bg))
+            table.insert(decls, "padding: 0 2px !important;")
+            table.insert(decls, "border-radius: 2px;")
+        end
+        if #decls == 0 then return "" end
 
-        -- 覆盖常见命名: 对话/发言/台词 类 class
+        -- 覆盖文笺离线标注 (.tf-dlg) 与常见对话 class
         return string.format([[
-        /* 对话文本样式 (Calibre 转换时挂上的 .dialogue 等) */
-        span.dialogue, .dialogue, span.dialog, .dialog, span.speech, span.quote-text, span.dlg {
-            font-weight: %s !important;
-            font-style: %s !important;
-            background-color: %s !important;
-            padding: 0 2px !important;
-            border-radius: 2px;
+        /* 对话文本样式 (.tf-dlg / .dialogue 等 class 标记) */
+        span.tf-dlg, .tf-dlg, span.dialogue, .dialogue, span.dialog, .dialog, span.speech, span.quote-text, span.dlg {
+            %s
         }
-    ]], weight, style, bg)
+    ]], table.concat(decls, "\n            "))
     end,
 
     blockquote_box = function(params)
@@ -287,7 +351,7 @@ CSSTemplates.layout_tweaks = {
 
         local css = string.format([[
         /* 章节标题装饰 */
-        h1, h2, h3, .title, .chapter-title, .calibre13 {
+        h1, h2, h3, .title, .chapter-title, .chaptertitle {
             %s
         }
     ]], table.concat(decls, "\n            "))
@@ -324,21 +388,19 @@ CSSTemplates.layout_tweaks = {
         local bold = params and params.bold
         if bold == nil then bold = defaults.bold end
 
-        -- 选择器覆盖各种 EPUB 章节结构；首字段落必须清掉 2em 缩进，否则右侧留大片空白
+        -- 精准定位章节开头首段，排除引用块内段落，避免误伤正文中任意容器首段
         return string.format([[
         /* 章节首字放大下沉 */
         h1 + p, h2 + p, h3 + p, h4 + p,
         h1 + hr + p, h2 + hr + p, h3 + hr + p,
         .title + p, .title + hr + p, .chapter-title + p, .chapter-title + hr + p, .chaptertitle + p, .chaptertitle + hr + p,
-        hr + p, div > p:first-of-type, section > p:first-of-type, article > p:first-of-type, body > p:first-of-type,
-        p:first-child, p:first-of-type {
+        hr + p, section > p:first-of-type, article > p:first-of-type, body > p:first-of-type {
             text-indent: 0 !important;
         }
         h1 + p::first-letter, h2 + p::first-letter, h3 + p::first-letter, h4 + p::first-letter,
         h1 + hr + p::first-letter, h2 + hr + p::first-letter, h3 + hr + p::first-letter,
         .title + p::first-letter, .title + hr + p::first-letter, .chapter-title + p::first-letter, .chapter-title + hr + p::first-letter, .chaptertitle + p::first-letter, .chaptertitle + hr + p::first-letter,
-        hr + p::first-letter, div > p:first-of-type::first-letter, section > p:first-of-type::first-letter, article > p:first-of-type::first-letter, body > p:first-of-type::first-letter,
-        p:first-child::first-letter, p:first-of-type::first-letter {
+        hr + p::first-letter, section > p:first-of-type::first-letter, article > p:first-of-type::first-letter, body > p:first-of-type::first-letter {
             font-size: %.1fem !important;
             float: left !important;
             line-height: 0.85 !important;
@@ -346,9 +408,15 @@ CSSTemplates.layout_tweaks = {
             margin-top: 2px !important;
             font-weight: %s !important;
         }
+        blockquote p::first-letter, .quote p::first-letter {
+            font-size: inherit !important;
+            float: none !important;
+            line-height: inherit !important;
+            margin: 0 !important;
+            font-weight: inherit !important;
+        }
     ]], scale, bold and "bold" or "normal")
     end,
-
 
     chapter_pagebreak = function(params)
         local defaults = CSSTemplates.tweak_defaults.chapter_pagebreak
@@ -357,7 +425,7 @@ CSSTemplates.layout_tweaks = {
 
         local heading_css = [[
         /* Force a new page before chapter headings inside multi-chapter HTML */
-        h1, h2, h3, .title, .chapter-title, .calibre13, .chaptertitle {
+        h1, h2, h3, .title, .chapter-title, .chaptertitle {
             page-break-before: always !important;
             break-before: page !important;
             page-break-after: avoid !important;
@@ -369,7 +437,7 @@ CSSTemplates.layout_tweaks = {
            Do not use bare "div > h2:first-child", or mid-book chapter wrappers lose the break. */
         body > h1:first-child, body > h2:first-child, body > h3:first-child,
         body > .title:first-child, body > .chapter-title:first-child,
-        body > .calibre13:first-child, body > .chaptertitle:first-child,
+        body > .chaptertitle:first-child,
         body > section:first-child > h1:first-child,
         body > section:first-child > h2:first-child,
         body > section:first-child > h3:first-child,
@@ -428,7 +496,7 @@ CSSTemplates.layout_tweaks = {
     pure_black = function()
         return [[
         /* Force pure black text for higher e-ink contrast */
-        body, p, div, span, li, a, .calibre14 {
+        body, p, div, span, li, a {
             color: #000000 !important;
         }
     ]]
@@ -458,9 +526,7 @@ CSSTemplates.layout_tweaks = {
 }
 
 -- 组合预设 (Presets)
--- Preset names are locale source strings: keep them in English and add
--- translations to locales/*.lua (the menu renders them through translate()).
-CSSTemplates.presets = {
-}
+-- Intentionally empty: users manage custom presets (and may mark one as default for new books).
+CSSTemplates.presets = {}
 
 return CSSTemplates

@@ -5,37 +5,20 @@
 -- Released under the GNU Affero General Public License v3.0 or later.
 -- See the LICENSE file in the project root for the full license text.
 
+local item_path = debug.getinfo(1, "S").source:sub(2)
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)core[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
+
 local FolioScene = {
     KEY = "typefolio_folio_scene",
     FORMAT = "folio-scene",
     INTERFACE_VERSION = 1,
 }
 
-local MODES = {
-    off = true,
-    auto = true,
-    quiet = true,
-    study = true,
-    editorial = true,
-    chapter = true,
-    swiss = true,
-    terminal = true,
-    quote = true,
-    ticket = true,
-    cover = true,
-    gallery = true,
-    dossier = true,
-    archive = true,
-    bookpost = true,
-    architecture = true,
-    zen = true,
-    mei = true,
-    lan = true,
-    zhu = true,
-    ju = true,
-    custom = true,
-    random = true,
-}
+local MODES = Config.FOLIO_SCENE_SET
 
 local SCENE_TO_STYLE = {
     quiet = "zen",

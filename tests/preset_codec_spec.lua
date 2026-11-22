@@ -174,6 +174,17 @@ check("an invented parameter is still rejected",
 check("an invented effect is still rejected",
     not effectValidates("sparkles", { on = true }))
 
+-- dialogue_style parameter validation.
+check("dialogue_style font_scale 105 imports", effectValidates("dialogue_style", { font_scale = 105 }))
+check("dialogue_style font_scale below 70 is rejected", not effectValidates("dialogue_style", { font_scale = 65 }))
+check("dialogue_style font_scale above 150 is rejected", not effectValidates("dialogue_style", { font_scale = 155 }))
+check("dialogue_style text_depth 80 imports", effectValidates("dialogue_style", { text_depth = 80 }))
+check("dialogue_style text_depth below 40 is rejected", not effectValidates("dialogue_style", { text_depth = 35 }))
+check("dialogue_style text_depth above 100 is rejected", not effectValidates("dialogue_style", { text_depth = 105 }))
+check("dialogue_style font_weight 600 imports", effectValidates("dialogue_style", { font_weight = "600" }))
+check("dialogue_style invalid font_weight is rejected", not effectValidates("dialogue_style", { font_weight = "ultra-super-bold" }))
+check("dialogue_style include_quotes boolean imports", effectValidates("dialogue_style", { include_quotes = false }))
+
 -- custom_header and custom_footer validation.
 --
 -- This block used to be written against left_slot / center_slot / right_slot / divider,
@@ -284,6 +295,21 @@ for legacy, current in pairs(Config.STATUS_DIVIDER_ALIASES) do
         Config.normalize{ custom_footer = { divider_style = legacy } }
             .custom_footer.divider_style == current)
 end
+
+check("disable_system_bars = true imports",
+    PresetCodec.validate({
+        format = PresetCodec.FORMAT,
+        format_version = PresetCodec.FORMAT_VERSION,
+        name = "Disable system bars",
+        config = { disable_system_bars = true },
+    }) ~= nil)
+check("disable_system_bars non-boolean is rejected",
+    PresetCodec.validate({
+        format = PresetCodec.FORMAT,
+        format_version = PresetCodec.FORMAT_VERSION,
+        name = "Disable system bars non-bool",
+        config = { disable_system_bars = "yes" },
+    }) == nil)
 
 print(string.format("preset_codec_spec: %s (%d checks, %d failures)",
     failures == 0 and "ok" or "FAILED", checks, failures))

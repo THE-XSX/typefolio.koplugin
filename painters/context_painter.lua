@@ -6,12 +6,15 @@
 -- See the LICENSE file in the project root for the full license text.
 
 local item_path = debug.getinfo(1, "S").source:sub(2)
-local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])") or item_path:match("(.*[/\\])") or "plugins/typefolio.koplugin/"
-local MarkLayout = dofile(PLUGIN_ROOT .. "painters/mark_layout.lua")
-local HealthCheck = dofile(PLUGIN_ROOT .. "tools/health_check.lua")
-local SemanticLayout = dofile(PLUGIN_ROOT .. "painters/semantic_layout.lua")
-local DialogueLayout = dofile(PLUGIN_ROOT .. "painters/dialogue_layout.lua")
-local EmphasisLayout = dofile(PLUGIN_ROOT .. "painters/emphasis_layout.lua")
+local PLUGIN_ROOT = item_path:match("(.*[/\\]typefolio%.koplugin[/\\])")
+    or item_path:match("^(.*)painters[/\\]") or item_path:match("(.*[/\\])")
+    or "plugins/typefolio.koplugin/"
+local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
+local MarkLayout = ModuleLoader.load(PLUGIN_ROOT, "painters/mark_layout.lua")
+local HealthCheck = ModuleLoader.load(PLUGIN_ROOT, "tools/health_check.lua")
+local SemanticLayout = ModuleLoader.load(PLUGIN_ROOT, "painters/semantic_layout.lua")
+local DialogueLayout = ModuleLoader.load(PLUGIN_ROOT, "painters/dialogue_layout.lua")
+local EmphasisLayout = ModuleLoader.load(PLUGIN_ROOT, "painters/emphasis_layout.lua")
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
@@ -22,17 +25,25 @@ local ContextPainter = WidgetContainer:extend{
     enabled = false,
 }
 
-function ContextPainter:setConfig(config)
+function ContextPainter:setConfig(config, plan)
     self.awareness = config.awareness or {}
     self.semantic_drawing = config.semantic_drawing or {}
     self.dialogue_painter = config.dialogue_painter or {}
     self.emphasis_painter = config.emphasis_painter or {}
     self.config = config
+    -- Dual-path coordination: when RenderPlanner determines that CSS dialogue styling
+    -- already covers this tagged book, suppress the dynamic dialogue painter at runtime
+    -- without destructively mutating the reader's saved config toggle.
+    if type(plan) == "table" and plan.dialogue_painter_enabled ~= nil then
+        self.dialogue_effective_enabled = plan.dialogue_painter_enabled == true
+    else
+        self.dialogue_effective_enabled = self.dialogue_painter.enabled == true
+    end
     local chapter = self.awareness.chapter or {}
     self.enabled = chapter.start and chapter.start.enabled == true
         or chapter["end"] and chapter["end"].enabled == true
         or self.semantic_drawing.enabled == true
-        or self.dialogue_painter.enabled == true
+        or self.dialogue_effective_enabled == true
         or self.emphasis_painter.enabled == true
 end
 
@@ -43,7 +54,10 @@ end
 local function scaledOptions(options)
     local copy = {}
     for key, value in pairs(options or {}) do copy[key] = value end
-    copy.thickness = math.max(1, Screen:scaleBySize(tonumber(copy.thickness) or 1))
+    -- Preserve unscaled thickness for text-based chapter decorations so Font:getFace
+    -- receives a raw point size instead of being double-scaled by Screen:scaleBySize.
+    copy.raw_thickness = tonumber(copy.thickness) or 1
+    copy.thickness = math.max(1, Screen:scaleBySize(copy.raw_thickness))
     -- Stored unscaled like `thickness`, so it scales here too. Zero stays zero: scaleBySize
     -- rounds up to 1 on most screens, which would give "off" a visible one-pixel trim.
     local inset = tonumber(copy.vertical_inset) or 0
@@ -79,27 +93,36 @@ local function paintRects(bb, rects, perf)
     end
 end
 
-local function paintTexts(bb, texts, perf)
+local function paintTexts(bb, texts, perf, viewport)
     if not texts or #texts == 0 then return end
+    local screen_w = viewport and viewport.w or Screen:getWidth()
+    local screen_h = viewport and viewport.h or Screen:getHeight()
     for _, item in ipairs(texts) do
-        local face = Font:getFace("cfont", item.font_size or 16)
+        -- Raw point size: Font:getFace scales internally via Screen:scaleBySize.
+        local face = Font:getFace("cfont", item.font_size or 14)
         if face then
             local tb = TextWidget:new{
                 text = item.text,
                 face = face,
                 fgcolor = Blitbuffer.COLOR_BLACK,
-                bgcolor = Blitbuffer.COLOR_WHITE,
+                max_width = math.max(1, screen_w),
             }
             local size = tb:getSize()
-            local x = math.floor(item.center - size.w / 2)
-            local y = math.floor(item.y - size.h / 2)
-
-            local mask = Blitbuffer.new(size.w, size.h, Blitbuffer.TYPE_BB8)
-            mask:fill(Blitbuffer.COLOR_WHITE)
-            tb:paintTo(mask, 0, 0)
-            mask:invertRect(0, 0, size.w, size.h)
-            bb:colorblitFromRGB32(mask, math.max(0, x), math.max(0, y), 0, 0, size.w, size.h, Blitbuffer.COLOR_BLACK)
-            mask:free()
+            local x = math.floor((item.center or screen_w / 2) - size.w / 2)
+            local y
+            if item.anchor == "above" and type(item.edge_y) == "number" then
+                y = math.floor(item.edge_y - size.h)
+            elseif item.anchor == "below" and type(item.edge_y) == "number" then
+                y = math.floor(item.edge_y)
+            else
+                y = math.floor((item.y or 0) - size.h / 2)
+            end
+            x = math.max(0, math.min(math.max(0, screen_w - size.w), x))
+            y = math.max(0, math.min(math.max(0, screen_h - size.h), y))
+            -- Paint directly onto bb without intermediate BB8 mask allocation, and
+            -- always free the TextWidget to prevent glyph bitmap memory leaks.
+            tb:paintTo(bb, x, y)
+            tb:free()
         end
     end
     if perf then perf:mark("paint.text_widgets", #texts) end
@@ -124,16 +147,20 @@ function ContextPainter:paintTo(bb, x, y)
                 })
             end)
             paintRects(bb, rects, self.perf)
-            paintTexts(bb, texts, self.perf)
+            paintTexts(bb, texts, self.perf, snapshot.page and snapshot.page.viewport)
         end
     end
 
-    local need_semantic = (self.semantic_drawing.enabled or self.dialogue_painter.enabled or self.emphasis_painter.enabled)
+    local dialogue_enabled = self.dialogue_effective_enabled
+    if dialogue_enabled == nil then
+        dialogue_enabled = self.dialogue_painter.enabled == true
+    end
+    local need_semantic = (self.semantic_drawing.enabled or dialogue_enabled or self.emphasis_painter.enabled)
         and self.semantic_index ~= nil
 
     if need_semantic then
         local needs_structure = self.semantic_drawing.enabled or self.emphasis_painter.enabled
-        local profile = self.dialogue_painter.enabled
+        local profile = dialogue_enabled
             and (needs_structure and "full" or "dialogue") or "structure"
         local semantic_snapshot = self.semantic_index:inspect({ profile = profile })
 
@@ -151,7 +178,7 @@ function ContextPainter:paintTo(bb, x, y)
             paintRects(bb, rects, self.perf)
         end
 
-        if self.dialogue_painter.enabled then
+        if dialogue_enabled then
             local options = scaledOptions(self.dialogue_painter)
             local context = self.context
             if context and type(context.boxesForRange) == "function" then
@@ -172,9 +199,7 @@ function ContextPainter:paintTo(bb, x, y)
         if self.emphasis_painter.enabled then
             local options = scaledOptions(self.emphasis_painter)
             -- 着重号 geometry is in device pixels, and scaledOptions only scales
-            -- `thickness`, which the emphasis layout does not read. Unscaled, a 2px dot
-            -- spaced every 12px is roughly half size and twice as dense as intended on a
-            -- 300 DPI screen -- and there is no menu row to compensate with. Defaults are
+            -- `thickness`, which the emphasis layout does not read. Defaults are
             -- repeated from emphasis_layout because the keys are optional in the config.
             options.size = math.max(1, Screen:scaleBySize(tonumber(self.emphasis_painter.size) or 2))
             options.gap = math.max(4, Screen:scaleBySize(tonumber(self.emphasis_painter.gap) or 12))

@@ -31,11 +31,20 @@ local function lineExtents(lines, screen)
     return left, right, top, bottom
 end
 
-local function chapterDecoration(rects, texts, center, width, y, opts, screen)
+-- Compute raw point size for Font:getFace (which applies Screen:scaleBySize internally).
+-- Uses unscaled raw_thickness when supplied by ContextPainter so 300 DPI screens do not
+-- double-scale chapter text symbols.
+local function textPointSize(opts)
+    local raw = tonumber(opts.raw_thickness) or tonumber(opts.thickness) or 1
+    return math.max(12, math.min(36, math.floor(raw * 6 + 6)))
+end
+
+local function chapterDecoration(rects, texts, center, width, y, opts, screen, anchor, edge_y)
     local style = opts.style or "single"
     local thickness = tonumber(opts.thickness) or 1
     local count = math.max(1, math.min(20, tonumber(opts.count) or 5))
     local char = opts.char or "★"
+    local font_size = textPointSize(opts)
 
     if style == "single" then
         local x = center - width / 2
@@ -54,13 +63,22 @@ local function chapterDecoration(rects, texts, center, width, y, opts, screen)
         end
     elseif style == "wave" then
         local wave_str = string.rep("〰 ", count):gsub("%s+$", "")
-        table.insert(texts, { center = center, y = y, text = wave_str, font_size = math.max(14, thickness * 10) })
+        table.insert(texts, {
+            center = center, y = y, edge_y = edge_y, anchor = anchor,
+            text = wave_str, font_size = font_size,
+        })
     elseif style == "heart" then
         local heart_str = string.rep("♥ ", count):gsub("%s+$", "")
-        table.insert(texts, { center = center, y = y, text = heart_str, font_size = math.max(14, thickness * 10) })
+        table.insert(texts, {
+            center = center, y = y, edge_y = edge_y, anchor = anchor,
+            text = heart_str, font_size = font_size,
+        })
     elseif style == "custom" then
         local custom_str = string.rep(char .. " ", count):gsub("%s+$", "")
-        table.insert(texts, { center = center, y = y, text = custom_str, font_size = math.max(14, thickness * 10) })
+        table.insert(texts, {
+            center = center, y = y, edge_y = edge_y, anchor = anchor,
+            text = custom_str, font_size = font_size,
+        })
     else
         local x = center - width / 2
         addRect(rects, x, y, width, thickness, screen)
@@ -81,30 +99,34 @@ function MarkLayout.chapter(snapshot, options)
         local thickness = start_options.thickness or 1
         local style = start_options.style or "single"
         local is_text = style == "wave" or style == "heart" or style == "custom"
-        local font_size = math.max(14, thickness * 10)
-        local gap = is_text and math.max(12, math.floor(font_size * 0.5)) or math.max(4, thickness * 3)
-        local y
+        local font_size = textPointSize(start_options)
+        local gap = is_text and math.max(6, thickness * 4) or math.max(4, thickness * 3)
+        local y, edge_y
         if is_text then
-            y = math.max(font_size / 2, top - gap - font_size / 2)
+            edge_y = math.max(0, top - gap)
+            y = math.max(font_size / 2, edge_y - font_size / 2)
         else
             y = math.max(0, top - gap - (style == "double" and thickness * 3 or thickness))
         end
-        chapterDecoration(rects, texts, center, width, y, start_options, screen)
+        chapterDecoration(rects, texts, center, width, y, start_options, screen,
+            is_text and "above" or nil, edge_y)
     end
     local end_options = options["end"] or {}
     if chapter.is_end and end_options.enabled then
         local thickness = end_options.thickness or 1
         local style = end_options.style or "single"
         local is_text = style == "wave" or style == "heart" or style == "custom"
-        local font_size = math.max(14, thickness * 10)
-        local gap = is_text and math.max(12, math.floor(font_size * 0.5)) or math.max(4, thickness * 3)
-        local y
+        local font_size = textPointSize(end_options)
+        local gap = is_text and math.max(6, thickness * 4) or math.max(4, thickness * 3)
+        local y, edge_y
         if is_text then
-            y = math.min(screen.h - font_size / 2, bottom + gap + font_size / 2)
+            edge_y = math.min(screen.h, bottom + gap)
+            y = math.min(screen.h - font_size / 2, edge_y + font_size / 2)
         else
             y = math.min(screen.h - thickness * 3, bottom + gap)
         end
-        chapterDecoration(rects, texts, center, width, y, end_options, screen)
+        chapterDecoration(rects, texts, center, width, y, end_options, screen,
+            is_text and "below" or nil, edge_y)
     end
     return rects, texts
 end
