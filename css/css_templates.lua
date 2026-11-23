@@ -164,7 +164,7 @@ end
 -- 高级排版特效库
 -- 每个特效是 function(params) -> css；params 缺省时由各自的 defaults 兜底。
 CSSTemplates.tweak_defaults = {
-    dialogue_style = { tint = true, tint_level = "light", bold = false, italic = false, font_family = "" },
+    dialogue_style = { tint = true, tint_level = "light", font_color = "default", bold = false, italic = false, font_family = "" },
     header_border = { border = "both", line_style = "solid", thickness = 1, centered = true,
         include_centered = true },
     chapter_pagebreak = { include_centered = true },
@@ -176,6 +176,7 @@ CSSTemplates.tweak_defaults = {
 -- 参数取值域，菜单与模板共用一份，避免两处各写各的
 CSSTemplates.tweak_options = {
     tint_level = { "light", "medium", "strong" },
+    font_color = { "default", "black", "dark", "medium", "light" },
     line_style = { "solid", "dashed", "dotted" },
     border = { "both", "bottom", "top", "left", "none" },
     tint = { "none", "light", "medium" },
@@ -222,12 +223,19 @@ CSSTemplates.layout_tweaks = {
         local italic = params and params.italic
         if italic == nil then italic = defaults.italic end
         local tint_level = (params and params.tint_level) or defaults.tint_level
+        local font_color = (params and params.font_color) or defaults.font_color or "default"
         local font_family = Config.sanitizeFontFamily(params and params.font_family or defaults.font_family)
 
         local tint_colors = {
             light  = "rgba(0, 0, 0, 0.08)",
             medium = "rgba(0, 0, 0, 0.16)",
             strong = "rgba(0, 0, 0, 0.25)",
+        }
+        local font_colors = {
+            black  = "#000000",
+            dark   = "#444444",
+            medium = "#666666",
+            light  = "#888888",
         }
 
         -- Emit only declarations that are actively requested so e.g. switching dialogue
@@ -237,6 +245,9 @@ CSSTemplates.layout_tweaks = {
             -- Omit a generic ", serif" fallback so crengine uses KOReader's configured
             -- CJK fallback font chain cleanly instead of substituting a CJK-incomplete serif.
             table.insert(decls, string.format('font-family: "%s" !important;', font_family))
+        end
+        if font_color and font_colors[font_color] then
+            table.insert(decls, string.format("color: %s !important;", font_colors[font_color]))
         end
         if bold then
             table.insert(decls, "font-weight: bold !important;")

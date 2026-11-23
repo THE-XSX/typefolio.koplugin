@@ -436,6 +436,34 @@ function EpubDialogueTagger.isTaggedCopy(path)
     return type(path) == "string" and path:lower():match("%.tf_dlg%.epub$") ~= nil
 end
 
+function EpubDialogueTagger.getCachedCopyPath(source_path, data_dir, opts, lfs_mod)
+    local path = EpubDialogueTagger.buildCachePath(source_path, data_dir, opts)
+    if not path then return nil end
+    local ok_lfs, lfs = true, lfs_mod
+    if not lfs then
+        ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+        if not ok_lfs then ok_lfs, lfs = pcall(require, "lfs") end
+    end
+    if ok_lfs and lfs and type(lfs.attributes) == "function" then
+        local attr = lfs.attributes(path)
+        if attr and (attr.size or 0) > 0 then
+            return path
+        end
+    else
+        local f = io.open(path, "rb")
+        if f then
+            local size = f:seek("end") or 0
+            f:close()
+            if size > 0 then return path end
+        end
+    end
+    return nil
+end
+
+function EpubDialogueTagger.hasCachedCopy(source_path, data_dir, opts, lfs_mod)
+    return EpubDialogueTagger.getCachedCopyPath(source_path, data_dir, opts, lfs_mod) ~= nil
+end
+
 local function isHtmlEntry(name)
     if type(name) ~= "string" then return false end
     local lower = name:lower()

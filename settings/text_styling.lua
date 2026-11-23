@@ -6,8 +6,8 @@
 -- See the LICENSE file in the project root for the full license text.
 
 -- settings/text_styling.lua
--- Body & chapters settings: ruled lines/underlines, dialogue, emphasis dots,
--- chapters, blockquote, drop caps.
+-- Body & chapters settings: ruled lines/underlines, dialogue, chapters,
+-- blockquote, drop caps.
 local item_path = debug.getinfo(1, "S").source:sub(2)
 local SETTINGS_ROOT = item_path:match("(.*[/\\])") or ""
 local TextMarksSettings = dofile(SETTINGS_ROOT .. "text_marks.lua")
@@ -40,20 +40,6 @@ function TextStylingSettings.items(ctx)
             sub_item_table_func = function() return TextMarksSettings.items(ctx) end,
         },
         dialogue_item,
-        {
-            text = tr("Emphasis dots"),
-            keep_menu_open = true,
-            checked_func = function()
-                return readConfig(ctx).emphasis_painter.enabled == true
-            end,
-            checkmark_callback = function(touchmenu_instance)
-                local config = ctx.getConfig(ctx.ui)
-                config.emphasis_painter.enabled = not config.emphasis_painter.enabled
-                ctx.applyStyle(config)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-            sub_item_table_func = function() return TweakMenus.emphasisItems(ctx) end,
-        },
         {
             text = tr("Chapters"),
             sub_item_table_func = function() return ChapterSettings.items(ctx) end,

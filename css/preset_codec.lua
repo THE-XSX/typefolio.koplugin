@@ -215,6 +215,7 @@ local PARAM_RULES = {
     dialogue_style = {
         tint = "boolean",
         tint_level = { "light", "medium", "strong" },
+        font_color = { "default", "black", "dark", "medium", "light" },
         bold = "boolean",
         italic = "boolean",
         font_family = "font_family",

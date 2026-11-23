@@ -150,6 +150,7 @@ local STATUS_DIVIDER_SET = toSet(Config.STATUS_DIVIDERS)
 local DIVIDER_POSITION_SET = toSet({ "auto", "above", "below" })
 local DIALOGUE_MODE_SET = toSet({ "tint", "underline", "side_bar" })
 local DIALOGUE_LANG_SET = toSet({ "cn", "en", "all" })
+local DIALOGUE_FONT_COLOR_SET = toSet({ "default", "black", "dark", "medium", "light" })
 local TINT_LEVEL_SET = toSet({ "light", "medium", "strong" })
 local CHAPTER_STYLE_SET = toSet(Config.CHAPTER_STYLES)
 
@@ -355,8 +356,13 @@ function Config.normalize(value)
         bq_params.bg_tint = nil
     end
     local dlg_params = config.tweak_params.dialogue_style
-    if type(dlg_params) == "table" and dlg_params.font_family ~= nil then
-        dlg_params.font_family = Config.sanitizeFontFamily(dlg_params.font_family)
+    if type(dlg_params) == "table" then
+        if dlg_params.font_family ~= nil then
+            dlg_params.font_family = Config.sanitizeFontFamily(dlg_params.font_family)
+        end
+        if dlg_params.font_color ~= nil and not DIALOGUE_FONT_COLOR_SET[dlg_params.font_color] then
+            dlg_params.font_color = "default"
+        end
     end
     if config.skip_headings == nil then config.skip_headings = true end
     if config.skip_blockquotes == nil then config.skip_blockquotes = true end
@@ -385,7 +391,7 @@ function Config.normalize(value)
         config.dialogue_painter[key] = val == nil and default or val
     end
     local dp = config.dialogue_painter
-    dp.enabled = booleanOr(dp.enabled, false)
+    dp.enabled = false
     dp.mode = DIALOGUE_MODE_SET[dp.mode] and dp.mode or "tint"
     dp.lang = DIALOGUE_LANG_SET[dp.lang] and dp.lang or "all"
     dp.thickness = thicknessOr(dp.thickness, 1)

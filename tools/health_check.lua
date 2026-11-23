@@ -173,29 +173,29 @@ function HealthCheck.run(snapshot, config, ui, perf)
 
     if has_dialogue_class then
         table.insert(features, {
-            name = "Dialogue highlighting",
+            name = "Dialogue styling",
             status = "ok",
-            badge = "【✔】 Class Markup Found",
-            desc = "Detected .tf-dlg / .dialogue / .dialog classes in HTML.",
-            action1 = "Enable Dialogue Highlighting (Class mode) and optional dialogue font.",
-            action2 = "Class markup already present in EPUB.",
+            badge = "【✔】 Fully Supported",
+            desc = "Detected dialogue markup in HTML.",
+            action1 = "Enable Dialogue styling in menu.",
+            action2 = "Dialogue markup already present in EPUB.",
         })
     elseif has_quotes then
         table.insert(features, {
-            name = "Dialogue highlighting",
+            name = "Dialogue styling",
             status = "ok",
-            badge = "【✔】 Dynamic Detection Ready",
+            badge = "【✔】 Ready to Generate Copy",
             desc = "No dialogue class found, but quote marks were detected.",
-            action1 = "Enable 'Dynamic quotes detection', or generate a dialogue-tagged copy under Text styling → Dialogue to switch dialogue fonts.",
+            action1 = "Generate a dialogue copy under Text styling → Dialogue to customize dialogue fonts and styles.",
             action2 = "See the dialogue regex in the Calibre guide below.",
         })
     else
         table.insert(features, {
-            name = "Dialogue highlighting",
+            name = "Dialogue styling",
             status = "info",
             badge = "【i】 No Quotes Sampled",
             desc = "No dialogue quotes or classes were found in sample pages.",
-            action1 = "Keep Dynamic quotes detection enabled.",
+            action1 = "Generate a dialogue copy under Text styling → Dialogue if this book contains spoken dialogue.",
             action2 = "See the dialogue regex in the Calibre guide below.",
         })
     end

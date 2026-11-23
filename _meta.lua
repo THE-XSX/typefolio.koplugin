@@ -10,5 +10,5 @@ return {
     fullname = "文笺 (Type Folio)",
     description = "为 EPUB 等排版书提供全局排版预设、信笺横线、对话/章节/段落微调及自定义状态栏。",
     author = "THE-XSX",
-    version = "3.2.0",
+    version = "3.3.0",
 }

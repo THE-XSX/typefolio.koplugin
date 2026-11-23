@@ -4,7 +4,7 @@
 
 ## 中文说明
 
-「文笺」为 EPUB 等 CRE 排版书提供开箱即用的全局平台排版预设（微信读书 / Kindle 原生 / KOBO 原生）、对话换字体与高亮、章节与正文微调（段落间距、章节标题线条、信笺下划线、着重号、引用块、首字下沉）以及高度可定制的顶部页眉与底部页脚状态栏。
+「文笺」为 EPUB 等 CRE 排版书提供开箱即用的全局平台排版预设（微信读书 / Kindle 原生 / KOBO 原生）、对话换字体与高亮、章节与正文微调（段落间距、章节标题线条、信笺下划线、引用块、首字下沉）以及高度可定制的顶部页眉与底部页脚状态栏。
 与「阅笺 / Reading Folio」为同族插件。
 
 ### 精简主菜单结构
@@ -12,7 +12,7 @@
 顶层菜单收敛为 5 项，高频功能触手可及：
 
 1. **排版预设**：3 套基于真机实拍校准的内置全局预设（**微信读书风格**、**Kindle 原生风格**、**KOBO 原生风格**）、自定义预设管理（含「新书默认预设 ★」与 `.typefolio.json` 导入/导出）以及「恢复默认排版」。
-2. **正文与章节**：集中管理段落间距、对话样式（对话字体 + 无损标注副本 + 动态引号高亮）、章节标题装饰与起止线、信笺下划线、着重号、引用块装饰与首字下沉。
+2. **正文与章节**：集中管理段落间距、对话样式（对话字体 + 字体颜色深浅 + 无损标注副本 + 自动打开副本）、章节标题装饰与起止线、信笺下划线、引用块装饰与首字下沉。
 3. **状态栏**：独立管理顶部页眉与底部页脚。支持勾选框快捷开关、9 组平台/设备状态栏局部预设（单独替换状态栏而不影响正文排版），以及三插槽、分割线、进度条与原生状态栏联动。
 4. **使用指南**：内置概览与渲染说明、手势与预设说明。
 5. **改动后预览页面**（默认开）：每次修改设置后自动临时收起菜单预览页面效果，轻触任意位置即原样回到当前子菜单。
@@ -33,7 +33,7 @@
 
 | 效果类别 | 渲染后端 | 特点 |
 | --- | --- | --- |
-| 逐行下划线、动态引号高亮、着重号、章节起止线 | 直接绘制（`registerViewModule`） | 不影响行高、不与原书 CSS 冲突、改粗细/笔触即时重绘 |
+| 逐行下划线、章节起止线 | 直接绘制（`registerViewModule`） | 不影响行高、不与原书 CSS 冲突、改粗细/笔触即时重绘 |
 | 段落间距、段落底线、强调词下划线、对话字体/Class 着色、章节标题装饰、引用块、首字下沉 | 官方 Style tweaks（`styletweaks/99_typefolio.css`） | 依赖 DOM 结构或字形重排，翻页零额外绘制开销 |
 | 自定义顶部页眉 & 底部页脚状态栏 | 独立 `Blitbuffer` 状态栏引擎 | 弹性多槽防重叠、`TextWidget` 复用、翻页零中间缓冲分配 |
 
@@ -46,11 +46,10 @@
 | 功能分类 | 特效 / 参数名称 | 可调参数与选项 | 作用机制 |
 | --- | --- | --- | --- |
 | **正文与章节** | **段落间距** | 相对 `em` 间距（`0.00 ~ 1.50 em`，步进 `0.05`） | `p { margin-top: 0; margin-bottom: X em }`（随字号等比缩放，跨尺寸屏幕比例一致） |
-| | **对话样式** | 双轨自动协同：<br>① **对话字体 & 无损标注副本**：从设备字体中指定对话独立字体；内置本地一键生成 `.tf_dlg.epub` 标注副本（原书不动，自动迁移配置与进度），支持底色（共享深浅）、加粗、斜体<br>② **动态引号匹配（无需改书）**：标记方式（底色 / 下划线 / 左侧竖线）、引号语言（中英 / 中 / 英）、共享底色深浅、上下留白 `0-8px` | ① `.tf-dlg` / `.dialogue` 等走 CSS，零翻页运行时开销；命中时自动暂停动态画笔避免双重加深<br>② 直接绘制精准定位引号内文字，说话人与旁白留白 |
+| | **对话样式** | **对话字体 & 字体颜色深浅 & 无损标注副本**：从设备字体中指定对话独立字体；可调对话字体颜色深浅（默认/纯黑/深灰/中灰/浅灰）；内置本地一键生成 `.tf_dlg.epub` 标注副本（原书不动，自动迁移配置与进度并支持打开原书时自动检测与自动打开副本），支持底色（深浅）、加粗、斜体 | `.tf-dlg` / `.dialogue` 等走 CSS，零翻页运行时开销 |
 | | **章节标题装饰** | 边框位置（上下 / 仅下 / 仅上 / **左侧竖条** / 无）、线样式、粗细 `1-5px`、是否居中 | `h1`~`h3`, `.title`, `.chapter-title`（CSS）；左侧竖条自动左对齐并留足上下留白 |
 | | **章节分页 & 起止线** | 章节前分页（支持居中段落回退）；章节开头/结尾标记独立开关，样式（单线 / 双线 / 五点）与 1–3 档粗细 | 分页走 CSS；起止线基于目录由 Painter 覆盖绘制，不改行高 |
 | | **信笺线与下划线** | 类型（无 / 逐行下划线 / 段落底线 / 强调词下划线）、笔触（实线 / 短虚线 / 密点 / 加粗实线）、线粗细（`1.0-2.0px` 及自定义 px）、跳过标题 / 跳过引用块 | 逐行下划线直接绘制，段落/强调词自动走 CSS |
-| | **着重号** | 点径（`1-6px`）、点距（`4-32px`，按屏幕 DPI 自动缩放） | 直接绘制于 `<em>` / `<strong>` / `<b>` / `<i>` / `<u>` 文字下方，按段落去重 |
 | | **引用块装饰** | 左竖线粗细（`0-8px`）、背景底色（无 / 浅 / 中）、是否斜体 | `blockquote`, `.quote`, `.citation`（CSS） |
 | | **首字放大下沉** | 放大倍数（`1.5-3.5em`）、是否加粗 | `h1+p::first-letter`, `p:first-of-type`（CSS） |
 | **状态栏** | **页眉与页脚** | 9 组局部状态栏预设（微信读书 / Kindle 原生 / KOBO 原生 / KOBO 双端 / 掌阅 / 汉王 / 文石 / 极简纯页码 / 现代全功能）；顶部/底部快捷勾选开关；左/中/右三插槽；分割线（无 / 实线 / 虚线 / 小圆点 / 微型进度条 / 自定义符号）；更多外观与选项（字号、加粗、边距偏移、章节起始页隐藏、原生状态栏联动） | `HeaderPainter` / `FooterPainter`（统一 `status_bar_helper.lua` 直接绘制于帧缓冲） |
@@ -68,7 +67,7 @@
 ### 手势快捷方式与安装
 
 - **手势绑定**：设置 → 手势（或快捷方式）→ 选一个手势 → 阅读器 → 排版 → 文笺。
-- **安装方法**：运行 `python3 tools/package.py` 生成 `typefolio.koplugin.zip`，将解压出的 `typefolio.koplugin` 文件夹复制到 KOReader 的 `plugins/` 目录并重启即可。
+- **安装方法**：将本插件目录 `typefolio.koplugin` 完整复制到 KOReader 的 `plugins/` 目录下（如 `koreader/plugins/typefolio.koplugin`），重启 KOReader 即可。
 
 ### 已知限制
 
@@ -96,19 +95,19 @@
 
 > **Full documentation (feature table, built-in platform presets, settings keys, extension notes) is in the Chinese section above.** This English section is a concise companion.
 
-Type Folio adds platform-calibrated global typesetting presets (WeRead, Kindle Native, Kobo Native), dialogue font switching & highlighting, paragraph/chapter styling, ruled underlines, emphasis dots, and customizable top/bottom status bars for CRE books (EPUB etc.) in KOReader. Sibling plugin of Reading Folio.
+Type Folio adds platform-calibrated global typesetting presets (WeRead, Kindle Native, Kobo Native), dialogue styling & font switching, paragraph/chapter styling, ruled underlines, and customizable top/bottom status bars for CRE books (EPUB etc.) in KOReader. Sibling plugin of Reading Folio.
 
 ### Streamlined Menu Map
 
 1. **Presets** — 3 built-in global platform presets (**WeRead Style**, **Kindle Native Style**, **Kobo Native Style**), custom presets (with "Default for new books ★" and versioned `.typefolio.json` import/export), plus **Restore default typesetting**.
-2. **Body & chapters** — **Paragraph spacing** (`0.00–1.50 em`), **Dialogue** (dedicated dialogue font + one-tap local `.tf_dlg.epub` tagged copy + dynamic quote painter with `0–8px` vertical inset), **Chapter headings** (including **Left vertical bar** & flush-left bottom rule), chapter page breaks & start/end ornaments, **Ruled lines & underlines** (with inline Skip headings / Skip blockquotes), **Emphasis dots**, **Blockquote**, and **Drop caps**.
+2. **Body & chapters** — **Paragraph spacing** (`0.00–1.50 em`), **Dialogue** (dedicated dialogue font + font color depth + background tint/level + bold/italic + non-destructive local `.tf_dlg.epub` copy with auto-detection and progress sync), **Chapter headings** (including **Left vertical bar** & flush-left bottom rule), chapter page breaks & start/end ornaments, **Ruled lines & underlines** (with inline Skip headings / Skip blockquotes), **Blockquote**, and **Drop caps**.
 3. **Status bar** — 9 independent status-bar layout presets (swap top/bottom bars without disturbing body typography), quick checkmark toggles for **Custom top header** & **Custom bottom footer**, 3-slot customization, clean dividers (None / Solid / Dashed / Small dots / Progress bar / Custom symbol), and native status-bar sync.
 4. **Help / user guide** — overview & rendering notes, gestures & presets guide.
 5. **Preview page after each change** — default on: steps the menu aside after every change so the page is visible, and any touch or key returns to the exact submenu, tab, and page.
 
 ### Automatic Hybrid Rendering
 
-Type Folio automatically selects the best backend behind the scenes: per-line underlines, dynamic quote marks, emphasis dots, chapter ornaments, and status bars are painted directly onto the framebuffer (zero line-height shift), while paragraph spacing, dialogue font/class rules, chapter borders, blockquotes, and drop caps are emitted through KOReader's official Style tweaks (`styletweaks/99_typefolio.css`).
+Type Folio automatically selects the best backend behind the scenes: per-line underlines, chapter ornaments, and status bars are painted directly onto the framebuffer (zero line-height shift), while paragraph spacing, dialogue styling & fonts, chapter borders, blockquotes, and drop caps are emitted through KOReader's official Style tweaks (`styletweaks/99_typefolio.css`).
 
 ### Settings Keys
 
@@ -147,6 +146,20 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 ---
 
 ## 更新记录 / Changelog
+
+### 2026-11-23 (v3.3.0)
+
+- **对话副本自动检测与无缝切入**：
+  - 打开原书时自动检测是否存在对应 `.tf_dlg.epub` 对话副本；若存在且开启自动跳转，则通过 `UIManager:nextTick` 无缝切换至副本，无需读者手动查找。
+  - **双向阅读进度无缝同步**：打开或切换副本时，自动将原书的阅读进度、百分比、书签与 XPointer 位置同步至副本；在副本中关闭或返回时，同样自动将最新阅读进度回写至原书。
+  - 新增「返回原书…」快捷操作，确认返回时自动暂停该书的自动跳转，读者亦可在原书菜单中随时开关「自动打开对话副本」。
+- **新增「对话字体颜色深浅」调节**：
+  - 在对话样式中提供 5 档文字浓淡选项：`默认（跟随正文）`、`纯黑 (#000000)`、`深灰 (#444444)`、`中灰 (#666666)`、`浅灰 (#888888)`，通过 CSS 注入实现零额外翻页开销，适应不同墨水屏对比度需求。
+- **对话菜单重整与全面「去技术化」**：
+  - 彻底移除「按 class 标记着色」、「未标注原书」、「DOM 标记」等底层实现术语，全界面统一采用「对话样式」与「对话副本」等读者视角概念。
+  - 移除对话菜单中的动态匹配画笔入口，主菜单清晰分为两段：上半部分为纯粹的排版视觉效果（对话样式开关、对话字体、字体颜色深浅、背景底色、底色深浅、加粗、斜体）；下半部分为智能副本管理（当前在副本显示已激活并支持返回原书，在原书显示打开/自动打开与生成副本，底部常驻缓存清理）。
+- **正文与章节菜单精简**：
+  - 移除「正文与章节」中的着重号选项，进一步聚焦核心段落、章节、标题与对话排版。
 
 ### 2026-11-22 (v3.2.0)
 

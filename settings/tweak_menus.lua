@@ -37,6 +37,13 @@ local TINT_LABELS = {
 local TINT_LEVEL_LABELS = {
     light = "Light", medium = "Medium", strong = "Strong",
 }
+local FONT_COLOR_LABELS = {
+    default = "Default (follow body)",
+    black = "Pure black",
+    dark = "Dark gray",
+    medium = "Medium gray",
+    light = "Light gray",
+}
 
 local function readConfig(ctx)
     if ctx.getReadonlyConfig then
@@ -62,16 +69,6 @@ local function setParam(ctx, tweak_key, name, value)
     ctx.applyStyle(config)
 end
 
-local function getDialoguePainter(ctx, name)
-    return readConfig(ctx).dialogue_painter[name]
-end
-
-local function setDialoguePainter(ctx, name, value)
-    local config = ctx.getConfig(ctx.ui)
-    config.dialogue_painter[name] = value
-    ctx.applyStyle(config)
-end
-
 local function getEmphasisPainter(ctx, name)
     return readConfig(ctx).emphasis_painter[name]
 end
@@ -82,26 +79,14 @@ local function setEmphasisPainter(ctx, name, value)
     ctx.applyStyle(config)
 end
 
-local function setDialogueTintLevel(ctx, value)
-    local config = ctx.getConfig(ctx.ui)
-    config.tweak_params.dialogue_style = config.tweak_params.dialogue_style or {}
-    config.tweak_params.dialogue_style.tint_level = value
-    config.dialogue_painter.tint_level = value
-    ctx.applyStyle(config)
-end
-
 function TweakMenus.dialogueActive(ctx)
     local config = readConfig(ctx)
     return config.tweaks.dialogue_style == true
-        or config.dialogue_painter.enabled == true
 end
 
 function TweakMenus.toggleDialogue(ctx)
     local config = ctx.getConfig(ctx.ui)
-    local turn_on = not (config.tweaks.dialogue_style == true
-        or config.dialogue_painter.enabled == true)
-    config.tweaks.dialogue_style = turn_on
-    config.dialogue_painter.enabled = turn_on
+    config.tweaks.dialogue_style = not config.tweaks.dialogue_style
     ctx.applyStyle(config)
 end
 
@@ -243,7 +228,7 @@ function TweakMenus.dialogueFontItems(ctx)
         if face ~= "" and ctx.hasDialogueClassMarkup and not ctx.hasDialogueClassMarkup()
                 and ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() then
             UIManager:show(ConfirmBox:new{
-                text = tr("This EPUB has no dialogue class markup yet, so changing the dialogue font requires a dialogue-tagged copy. Generate a cached copy now without modifying the original book?"),
+                text = tr("Changing dialogue font requires generating a dialogue copy for this book. Generate a copy now without modifying the original book?"),
                 ok_text = tr("Generate & open"),
                 ok_callback = function()
                     if ctx.generateDialogueTaggedCopy then
@@ -301,141 +286,6 @@ function TweakMenus.dialogueFontItems(ctx)
         })
     end
     return items
-end
-
-function TweakMenus.dialoguePainterItems(ctx)
-    local tr = ctx.tr
-    local T = ctx.T
-    local O = CSSTemplates.tweak_options
-    local painterOn = function() return getDialoguePainter(ctx, "enabled") == true end
-
-    local mode_labels = {
-        tint = "Background tint (quoted text)",
-        underline = "Underline (quoted text)",
-        side_bar = "Side bar (whole line)",
-    }
-    local mode_items = {}
-    for _, value in ipairs({ "tint", "underline", "side_bar" }) do
-        table.insert(mode_items, {
-            text = tr(mode_labels[value]),
-            radio = true,
-            keep_menu_open = true,
-            enabled_func = painterOn,
-            checked_func = function() return getDialoguePainter(ctx, "mode") == value end,
-            callback = function(touchmenu_instance)
-                setDialoguePainter(ctx, "mode", value)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-        })
-    end
-
-    local lang_labels = {
-        all = "All quotes (Chinese & English)",
-        cn = "Chinese quotes (“...” / 「...」)",
-        en = "English quotes (“...” / \"...\")",
-    }
-    local lang_items = {}
-    for _, value in ipairs({ "all", "cn", "en" }) do
-        table.insert(lang_items, {
-            text = tr(lang_labels[value]),
-            radio = true,
-            keep_menu_open = true,
-            enabled_func = painterOn,
-            checked_func = function() return getDialoguePainter(ctx, "lang") == value end,
-            callback = function(touchmenu_instance)
-                setDialoguePainter(ctx, "lang", value)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-        })
-    end
-
-    local tint_items = {}
-    for _, value in ipairs(O.tint_level) do
-        table.insert(tint_items, {
-            text = tr(TINT_LEVEL_LABELS[value]),
-            radio = true,
-            keep_menu_open = true,
-            checked_func = function()
-                return getParam(ctx, "dialogue_style", "tint_level") == value
-            end,
-            callback = function(touchmenu_instance)
-                setDialogueTintLevel(ctx, value)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-        })
-    end
-
-    return {
-        {
-            text_func = function()
-                local status
-                if ctx.isDialoguePainterSuppressedByCss and ctx.isDialoguePainterSuppressedByCss() then
-                    status = tr("Auto-paused (class markup active)")
-                else
-                    status = painterOn() and tr("Enabled") or tr("Disabled")
-                end
-                return T(tr("%1: %2"), tr("Dynamic quotes (No EPUB edit)"), status)
-            end,
-            keep_menu_open = true,
-            checked_func = painterOn,
-            callback = function(touchmenu_instance)
-                setDialoguePainter(ctx, "enabled", not painterOn())
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-            separator = true,
-        },
-        {
-            text = tr("Marking style"),
-            enabled_func = painterOn,
-            sub_item_table = mode_items,
-        },
-        {
-            text = tr("Target quotes language"),
-            enabled_func = painterOn,
-            sub_item_table = lang_items,
-        },
-        {
-            text = tr("Tint intensity"),
-            enabled_func = function()
-                local config = readConfig(ctx)
-                local css_tint = config.tweaks.dialogue_style == true
-                    and getParam(ctx, "dialogue_style", "tint") == true
-                local paint_tint = painterOn()
-                    and getDialoguePainter(ctx, "mode") == "tint"
-                return css_tint or paint_tint
-            end,
-            sub_item_table = tint_items,
-        },
-        {
-            text_func = function()
-                local value = getDialoguePainter(ctx, "vertical_inset") or 0
-                if value == 0 then
-                    return T(tr("Vertical inset: %1"), tr("None"))
-                end
-                return T(tr("Vertical inset: %1"), value .. "px")
-            end,
-            keep_menu_open = true,
-            enabled_func = painterOn,
-            callback = function(touchmenu_instance)
-                UIManager:show(SpinWidget:new{
-                    title_text = tr("Mark vertical inset"),
-                    info_text = tr("How far the mark keeps off the top and bottom of the line. Applies to all three marking styles."),
-                    value = getDialoguePainter(ctx, "vertical_inset") or 0,
-                    value_min = 0,
-                    value_max = Config.DIALOGUE_INSET_MAX,
-                    value_step = 1,
-                    value_hold_step = 2,
-                    unit = "px",
-                    default_value = 0,
-                    ok_always_enabled = true,
-                    callback = function(spin)
-                        setDialoguePainter(ctx, "vertical_inset", spin.value)
-                        if touchmenu_instance then touchmenu_instance:updateItems() end
-                    end,
-                })
-            end,
-        },
-    }
 end
 
 function TweakMenus.emphasisItems(ctx)
@@ -553,12 +403,9 @@ function TweakMenus.tweakSubItems(ctx, key)
         }
     elseif key == "dialogue_style" then
         local items = {}
-        local painter_items = TweakMenus.dialoguePainterItems(ctx)
-        -- Extract shared Tint intensity row (index 4 in dialoguePainterItems) so it sits
-        -- right after CSS attributes and serves both CSS tint and dynamic painter tint.
-        local tint_intensity_item = table.remove(painter_items, 4)
+        local doc_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
 
-        table.insert(items, tweakEnableItem(ctx, key, "Styling via class markup"))
+        table.insert(items, tweakEnableItem(ctx, key, "Dialogue styling"))
         table.insert(items, {
             text_func = function()
                 local font = Config.sanitizeFontFamily(getParam(ctx, "dialogue_style", "font_family"))
@@ -569,35 +416,111 @@ function TweakMenus.tweakSubItems(ctx, key)
         })
         table.insert(items, {
             text_func = function()
-                local doc_file = ctx.ui and ctx.ui.document and ctx.ui.document.file
-                if EpubDialogueTagger.isTaggedCopy(doc_file) then
-                    return tr("Dialogue-tagged copy active")
-                end
-                return tr("Generate dialogue-tagged copy…")
+                local val = getParam(ctx, "dialogue_style", "font_color") or "default"
+                return T(tr("Font color depth: %1"), tr(FONT_COLOR_LABELS[val] or "Default (follow body)"))
             end,
-            enabled_func = function()
-                return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
-            end,
-            callback = function(touchmenu_instance)
-                if ctx.generateDialogueTaggedCopy then
-                    ctx.generateDialogueTaggedCopy(touchmenu_instance)
-                end
-            end,
+            enabled_func = function() return readConfig(ctx).tweaks[key] == true end,
+            sub_item_table = paramRadio(ctx, key, "font_color", O.font_color,
+                function(v) return tr(FONT_COLOR_LABELS[v]) end),
         })
         table.insert(items, paramToggle(ctx, key, "tint", "Background tint"))
+        table.insert(items, {
+            text_func = function()
+                local val = getParam(ctx, "dialogue_style", "tint_level") or "light"
+                return T(tr("Tint intensity: %1"), tr(TINT_LEVEL_LABELS[val] or "Light"))
+            end,
+            enabled_func = function()
+                return readConfig(ctx).tweaks[key] == true
+                    and getParam(ctx, "dialogue_style", "tint") == true
+            end,
+            sub_item_table = paramRadio(ctx, key, "tint_level", O.tint_level,
+                function(v) return tr(TINT_LEVEL_LABELS[v]) end),
+        })
         table.insert(items, paramToggle(ctx, key, "bold", "Bold"))
         table.insert(items, paramToggle(ctx, key, "italic", "Italic"))
-        if tint_intensity_item then
-            tint_intensity_item.separator = true
-            table.insert(items, tint_intensity_item)
-        else
-            items[#items].separator = true
-        end
-
-        for _, item in ipairs(painter_items) do
-            table.insert(items, item)
-        end
         items[#items].separator = true
+
+        if EpubDialogueTagger.isTaggedCopy(doc_file) then
+            table.insert(items, {
+                text = tr("Dialogue copy active"),
+                enabled_func = function() return false end,
+            })
+            table.insert(items, {
+                text = tr("Return to original book…"),
+                keep_menu_open = false,
+                callback = function(touchmenu_instance)
+                    UIManager:show(ConfirmBox:new{
+                        text = tr("Return to original book? Auto-opening the dialogue copy will be paused."),
+                        ok_text = tr("Return to original"),
+                        ok_callback = function()
+                            if ctx.returnToOriginalBook then
+                                ctx.returnToOriginalBook(touchmenu_instance)
+                            end
+                        end,
+                        cancel_text = tr("Cancel"),
+                    })
+                end,
+            })
+            table.insert(items, {
+                text = tr("Regenerate dialogue copy…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.regenerateDialogueTaggedCopy then
+                        ctx.regenerateDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+        elseif ctx.hasExistingDialogueCopy and ctx.hasExistingDialogueCopy() then
+            table.insert(items, {
+                text = tr("Auto-open dialogue copy"),
+                keep_menu_open = true,
+                checked_func = function()
+                    return ctx.isAutoOpenDialogueCopyEnabled and ctx.isAutoOpenDialogueCopyEnabled()
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.setAutoOpenDialogueCopyEnabled then
+                        ctx.setAutoOpenDialogueCopyEnabled(not ctx.isAutoOpenDialogueCopyEnabled())
+                    end
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end,
+            })
+            table.insert(items, {
+                text = tr("Open dialogue copy"),
+                keep_menu_open = false,
+                callback = function(touchmenu_instance)
+                    if ctx.openDialogueTaggedCopy then
+                        ctx.openDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+            table.insert(items, {
+                text = tr("Regenerate dialogue copy…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.regenerateDialogueTaggedCopy then
+                        ctx.regenerateDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+        else
+            table.insert(items, {
+                text = tr("Generate dialogue copy…"),
+                enabled_func = function()
+                    return ctx.canGenerateDialogueCopy and ctx.canGenerateDialogueCopy() or false
+                end,
+                callback = function(touchmenu_instance)
+                    if ctx.generateDialogueTaggedCopy then
+                        ctx.generateDialogueTaggedCopy(touchmenu_instance)
+                    end
+                end,
+            })
+        end
 
         local cached_summary = nil
         local function getCacheSummary(force)
@@ -611,10 +534,10 @@ function TweakMenus.tweakSubItems(ctx, key)
             text_func = function()
                 local info = getCacheSummary(false)
                 if info and info.count > 0 then
-                    return T(tr("Clear dialogue cache copies (%1, %2 MB)…"),
+                    return T(tr("Clear dialogue copy cache (%1, %2 MB)…"),
                         tostring(info.count), string.format("%.1f", info.total_bytes / (1024 * 1024)))
                 end
-                return tr("Clear dialogue cache copies…")
+                return tr("Clear dialogue copy cache…")
             end,
             keep_menu_open = true,
             enabled_func = function()
@@ -625,7 +548,7 @@ function TweakMenus.tweakSubItems(ctx, key)
                 local info = getCacheSummary(true)
                 if not info or info.count == 0 then return end
                 UIManager:show(ConfirmBox:new{
-                    text = T(tr("Delete %1 cached dialogue-tagged EPUB copy/copies (%2 MB)? Original books will not be affected."),
+                    text = T(tr("Delete %1 cached dialogue copy/copies (%2 MB)? Original books will not be affected."),
                         tostring(info.count), string.format("%.1f", info.total_bytes / (1024 * 1024))),
                     ok_text = tr("Delete"),
                     ok_callback = function()
