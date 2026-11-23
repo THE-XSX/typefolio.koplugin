@@ -218,10 +218,37 @@ end
 
 function TextMarksSettings.items(ctx)
     local tr = ctx.tr
+    local getConfig = ctx.getConfig
+    local readConfig = ctx.getReadonlyConfig or getConfig
+    local applyStyle = ctx.applyStyle
+    local ui = ctx.ui
+
     return {
-        { text = tr("Mark type"), sub_item_table = TextMarksSettings.underlineItems(ctx) },
+        { text = tr("Line type"), sub_item_table = TextMarksSettings.underlineItems(ctx) },
         { text = tr("Stroke style"), sub_item_table = TextMarksSettings.strokeItems(ctx) },
-        { text = tr("Line thickness"), sub_item_table = TextMarksSettings.thicknessItems(ctx) },
+        { text = tr("Line thickness"), sub_item_table = TextMarksSettings.thicknessItems(ctx), separator = true },
+        {
+            text = tr("Skip headings and centered text"),
+            keep_menu_open = true,
+            checked_func = function() return readConfig(ui).skip_headings ~= false end,
+            callback = function(touchmenu_instance)
+                local config = getConfig(ui)
+                config.skip_headings = config.skip_headings == false
+                applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        },
+        {
+            text = tr("Skip blockquotes"),
+            keep_menu_open = true,
+            checked_func = function() return readConfig(ui).skip_blockquotes ~= false end,
+            callback = function(touchmenu_instance)
+                local config = getConfig(ui)
+                config.skip_blockquotes = config.skip_blockquotes == false
+                applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        },
     }
 end
 

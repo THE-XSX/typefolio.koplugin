@@ -213,7 +213,10 @@ function StatusBarHelper:getChapterTicks(ui, total_pages)
 end
 
 function StatusBarHelper.invalidateTocCache(self)
-    if self then self.toc_cache = nil end
+    if self then
+        self.toc_cache = nil
+        self._text_h_cache = {}
+    end
 end
 
 -- Pages left in the current chapter. ReaderToc:getChapterPagesLeft returns nil in the
@@ -404,7 +407,9 @@ local SLOT_RESOLVERS = {
     end,
 
     book_title_page_progress_cn = function(ctx)
-        return string.format("%s · %d 之 %d", docTitle(ctx.ui, "正文"), ctx.page_num, ctx.total_pages)
+        return string.format("%s · %d 之 %d",
+            docTitle(ctx.ui, resolveStatusString(ctx, "STATUS_BOOK_FALLBACK")),
+            ctx.page_num, ctx.total_pages)
     end,
 
     custom_text = function(ctx) return ctx.custom_text or "" end,
@@ -609,12 +614,47 @@ function StatusBarHelper:paintBar(bb, opts)
     local center_text = StatusBarHelper.resolveSlotText(center_slot, ctx)
     local right_text = StatusBarHelper.resolveSlotText(right_slot, ctx)
 
-    local function measureWidth(text)
+    -- Build each active slot's TextWidget at most once during width probing, then
+    -- reuse that exact widget directly whenever it fits inside its final budget
+    -- (rebuilding with max_width only for a slot that actually needs ellipsis truncation).
+    local slot_widgets = {}
+    local function measureSlot(slot_key, text)
         if not text or text == "" then return 0 end
-        local probe = makeTextWidget(text, face, bold, usable_w)
-        local w = probe:getSize().w
-        probe:free()
-        return w
+        local widget = makeTextWidget(text, face, bold, usable_w)
+        local size = widget:getSize()
+        slot_widgets[slot_key] = { widget = widget, w = size.w, h = size.h }
+        return size.w
+    end
+
+    local function freeSlot(slot_key)
+        local entry = slot_widgets[slot_key]
+        if entry and entry.widget then
+            entry.widget:free()
+            entry.widget = nil
+        end
+    end
+
+    local function paintSlot(slot_key, text, x, y, max_w, align)
+        local entry = slot_widgets[slot_key]
+        if not text or text == "" or not max_w or max_w <= 0 then
+            freeSlot(slot_key)
+            return
+        end
+        if entry and entry.widget then
+            if entry.w <= max_w then
+                local draw_x = x
+                if align == "center" then
+                    draw_x = x + math.floor((max_w - entry.w) / 2)
+                elseif align == "right" then
+                    draw_x = x + max_w - entry.w
+                end
+                entry.widget:paintTo(bb, draw_x, y)
+                freeSlot(slot_key)
+                return
+            end
+            freeSlot(slot_key)
+        end
+        StatusBarHelper.paintText(bb, text, x, y, max_w, align, face, bold)
     end
 
     -- Flexible horizontal slot allocation: give short slots only what they need so
@@ -631,8 +671,8 @@ function StatusBarHelper:paintBar(bb, opts)
             right_max_w = usable_w
         elseif left_text ~= "" and right_text ~= "" then
             local avail = math.max(0, usable_w - gap)
-            local lw = measureWidth(left_text)
-            local rw = measureWidth(right_text)
+            local lw = measureSlot("left", left_text)
+            local rw = measureSlot("right", right_text)
             if lw + rw <= avail then
                 left_max_w = lw
                 right_max_w = rw
@@ -655,9 +695,9 @@ function StatusBarHelper:paintBar(bb, opts)
             center_max_w = usable_w
             center_x = h_margin
         else
-            local cw = measureWidth(center_text)
-            local lw = measureWidth(left_text)
-            local rw = measureWidth(right_text)
+            local cw = measureSlot("center", center_text)
+            local lw = measureSlot("left", left_text)
+            local rw = measureSlot("right", right_text)
             local max_side = math.max(lw, rw)
             local base_center_cap = math.floor(usable_w * 0.44)
             local elastic_center_cap = math.min(usable_w - 2 * gap, usable_w - 2 * (max_side + gap))
@@ -675,9 +715,14 @@ function StatusBarHelper:paintBar(bb, opts)
     local cache_key = tostring(font_size) .. ":" .. (bold and "1" or "0")
     local text_h = self._text_h_cache[cache_key]
     if not text_h then
-        local probe = makeTextWidget("Ag", face, bold, usable_w)
-        text_h = probe:getSize().h
-        probe:free()
+        local sample_entry = slot_widgets.left or slot_widgets.center or slot_widgets.right
+        if sample_entry and sample_entry.h and sample_entry.h > 0 then
+            text_h = sample_entry.h
+        else
+            local probe = makeTextWidget("Ag", face, bold, usable_w)
+            text_h = probe:getSize().h
+            probe:free()
+        end
         self._text_h_cache[cache_key] = text_h
     end
 
@@ -693,15 +738,9 @@ function StatusBarHelper:paintBar(bb, opts)
     local left_x = h_margin
     local right_x = h_margin + usable_w - right_max_w
 
-    if left_text ~= "" and left_max_w > 0 then
-        StatusBarHelper.paintText(bb, left_text, left_x, text_y, left_max_w, "left", face, bold)
-    end
-    if center_text ~= "" and center_max_w > 0 then
-        StatusBarHelper.paintText(bb, center_text, center_x, text_y, center_max_w, "center", face, bold)
-    end
-    if right_text ~= "" and right_max_w > 0 then
-        StatusBarHelper.paintText(bb, right_text, right_x, text_y, right_max_w, "right", face, bold)
-    end
+    paintSlot("left", left_text, left_x, text_y, left_max_w, "left")
+    paintSlot("center", center_text, center_x, text_y, center_max_w, "center")
+    paintSlot("right", right_text, right_x, text_y, right_max_w, "right")
 
     local divider_style = StatusBarHelper.canonicalDivider(cfg.divider_style or "none")
     if divider_style ~= "none" then

@@ -12,6 +12,8 @@ local HelpSettings = dofile(SETTINGS_ROOT .. "help.lua")
 local TextMarksSettings = dofile(SETTINGS_ROOT .. "text_marks.lua")
 local ChapterSettings = dofile(SETTINGS_ROOT .. "chapters.lua")
 local TextStylingSettings = dofile(SETTINGS_ROOT .. "text_styling.lua")
+local TypesettingToolsSettings = dofile(SETTINGS_ROOT .. "typesetting_tools.lua")
+local FolioScenesSettings = dofile(SETTINGS_ROOT .. "folio_scenes.lua")
 local CustomHeaderSettings = dofile(SETTINGS_ROOT .. "custom_header.lua")
 local CustomFooterSettings = dofile(SETTINGS_ROOT .. "custom_footer.lua")
 local StatusBarMenu = dofile(SETTINGS_ROOT .. "status_bar_menu.lua")
@@ -24,6 +26,8 @@ local Settings = {
     TextStyling = TextStylingSettings,
     CustomHeader = CustomHeaderSettings,
     CustomFooter = CustomFooterSettings,
+    TypesettingTools = TypesettingToolsSettings,
+    FolioScenes = FolioScenesSettings,
     Presets = PresetsSettings,
 }
 
@@ -31,35 +35,30 @@ function Settings.menuItems(ctx)
     local tr = ctx.tr
     local items = {}
 
-    -- 1. Presets (排版预设: 快速应用方案/保存预设)
     table.insert(items, {
         text = tr("Presets"),
         sub_item_table_func = function() return PresetsSettings.items(ctx) end,
         separator = true,
     })
-
-    -- 2. Text & chapters (正文与章节: 对话、章节、划线、着重号、引用、下沉、加粗)
     table.insert(items, {
-        text = tr("Text & chapters"),
+        text = tr("Body & chapters"),
         sub_item_table_func = function() return TextStylingSettings.items(ctx) end,
         separator = true,
     })
-
-    -- 3. Header & footer (页眉与页脚: 预设、顶部页眉、底部页脚、禁用系统状态栏)
     table.insert(items, {
-        text = tr("Header & footer"),
+        text = tr("Status bar"),
         sub_item_table_func = function() return StatusBarMenu.combinedItems(ctx) end,
         separator = true,
     })
-
-    -- 4. Help / user guide (使用指南: 移至底部)
     table.insert(items, {
         text = tr("Help / user guide"),
         sub_item_table_func = function() return HelpSettings.subItems(ctx) end,
         separator = true,
     })
-
-    -- 5. Preview page after each change (每次设置后实时预览)
+    -- Last, and a plain toggle rather than a submenu: it changes how this menu behaves, not
+    -- how the book looks, and it is the one row in here that deliberately does not preview
+    -- (it never calls applyStyle, so turning it on does not immediately make the menu
+    -- vanish).
     table.insert(items, {
         text_func = function()
             return ctx.T(tr("%1: %2"), tr("Preview page after each change"),

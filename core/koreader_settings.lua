@@ -404,115 +404,10 @@ function KOReaderSettings.restore(ui, captured, deps)
     return ok, err
 end
 
-local function protectFooterTouch(footer)
-    if not footer or footer._typefolio_touch_protected then return end
-    footer._typefolio_touch_protected = true
-    local orig_onTap = footer.onTap
-    local orig_onHold = footer.onHold
-    local orig_onSwipe = footer.onSwipe
-    if type(orig_onTap) == "function" then
-        footer.onTap = function(self, arg, ges)
-            if self.disabled or self._typefolio_disabled then return false end
-            return orig_onTap(self, arg, ges)
-        end
-    end
-    if type(orig_onHold) == "function" then
-        footer.onHold = function(self, arg, ges)
-            if self.disabled or self._typefolio_disabled then return false end
-            return orig_onHold(self, arg, ges)
-        end
-    end
-    if type(orig_onSwipe) == "function" then
-        footer.onSwipe = function(self, arg, ges)
-            if self.disabled or self._typefolio_disabled then return false end
-            return orig_onSwipe(self, arg, ges)
-        end
-    end
-end
-
--- Completely suppress KOReader's native top and bottom bars, neutralizing touch
--- triggers so touches fall through to page turns instead of opening footer settings.
-function KOReaderSettings.applyDisableSystemBars(ui, disabled, settings_override)
-    if not ui then return end
-    local footer = ui.footer or (ui.view and ui.view.footer)
-    local settings = settings_override or rawget(_G, "G_reader_settings")
-    local off = footer and footer.mode_list and footer.mode_list.off or 0
-    local key = KOReaderSettings.SAVED_NATIVE_FOOTER_MODE_KEY
-
-    if footer then
-        protectFooterTouch(footer)
-        if disabled == true then
-            footer._typefolio_disabled = true
-            footer.disabled = true
-            if ui.view then ui.view.footer_visible = false end
-            local current_mode = footer.mode
-            if type(current_mode) ~= "number" or current_mode == off then
-                current_mode = settings and settings:readSetting("reader_footer_mode")
-            end
-            if settings and type(current_mode) == "number" and current_mode ~= off then
-                if not settings:readSetting(key) then
-                    pcall(function() settings:saveSetting(key, current_mode) end)
-                end
-            end
-            if footer.applyFooterMode then
-                pcall(function() footer:applyFooterMode(off) end)
-            end
-            if settings then
-                pcall(function() settings:saveSetting("reader_footer_mode", off) end)
-            end
-            if footer.refreshFooter then
-                pcall(function() footer:refreshFooter(true, true) end)
-            end
-            pcall(function()
-                local Event = require("ui/event")
-                ui:handleEvent(Event:new("ToggleFooter", false))
-            end)
-        else
-            footer._typefolio_disabled = false
-            footer.disabled = false
-            if ui.view then ui.view.footer_visible = true end
-        end
-    end
-
-    if disabled == true then
-        -- Suppress KOReader Crengine top status line (1 = off)
-        if ui.document and ui.document.configurable then
-            if ui.document.configurable.status_line == 0 then
-                ui.document.configurable.status_line = 1
-                if ui.doc_settings then
-                    pcall(function() ui.doc_settings:saveSetting("copt_status_line", 1) end)
-                end
-                pcall(function()
-                    local Event = require("ui/event")
-                    ui:handleEvent(Event:new("ConfigChange", "status_line", 1))
-                    ui:handleEvent(Event:new("SetStatusLine", 1))
-                end)
-            end
-        end
-        -- Suppress header widget if present (PDF or alt status bar)
-        local header_obj = ui.header or (ui.view and ui.view.header)
-        if header_obj then
-            header_obj.disabled = true
-            header_obj._typefolio_disabled = true
-            if ui.view then ui.view.header_visible = false end
-            pcall(function()
-                local Event = require("ui/event")
-                ui:handleEvent(Event:new("ToggleHeader", false))
-            end)
-        end
-    else
-        local header_obj = ui.header or (ui.view and ui.view.header)
-        if header_obj then
-            header_obj.disabled = false
-            header_obj._typefolio_disabled = false
-        end
-    end
-end
-
 -- Hide KOReader's native crengine top status line (0 = on, 1 = off) when the custom
--- header is active or system bars are disabled, so bars never collide.
-function KOReaderSettings.syncNativeHeaderBar(ui, custom_header_enabled, disable_system_bars)
-    if custom_header_enabled ~= true and disable_system_bars ~= true then return end
+-- header is active so the two bars never collide.
+function KOReaderSettings.syncNativeHeaderBar(ui, custom_header_enabled)
+    if custom_header_enabled ~= true then return end
     if not (ui and ui.document and ui.document.configurable) then return end
     if ui.document.configurable.status_line == 0 then
         ui.document.configurable.status_line = 1
@@ -528,52 +423,25 @@ function KOReaderSettings.syncNativeHeaderBar(ui, custom_header_enabled, disable
 end
 
 -- Coordinate KOReader's native bottom footer symmetrically with the custom footer:
--- when custom footer turns on or system bars are disabled, remember the active native footer mode and hide it;
--- when custom footer turns off (and system bars are NOT disabled), restore the remembered mode once.
-function KOReaderSettings.syncNativeFooterBar(ui, custom_footer_enabled, settings_override, disable_system_bars)
+-- when custom footer turns on, remember the active native footer mode and hide it;
+-- when custom footer turns off, restore the remembered mode once.
+function KOReaderSettings.syncNativeFooterBar(ui, custom_footer_enabled, settings_override)
     local footer = ui and ui.view and ui.view.footer
     if not (footer and footer.mode_list and footer.applyFooterMode) then return end
     local settings = settings_override or rawget(_G, "G_reader_settings")
     local off = footer.mode_list.off or 0
     local key = KOReaderSettings.SAVED_NATIVE_FOOTER_MODE_KEY
 
-    if disable_system_bars == true then
-        protectFooterTouch(footer)
-        footer.disabled = true
-        footer._typefolio_disabled = true
-        if ui.view then ui.view.footer_visible = false end
-        local current_mode = footer.mode
-        if type(current_mode) ~= "number" or current_mode == off then
-            current_mode = settings and settings:readSetting("reader_footer_mode")
-        end
-        if settings and type(current_mode) == "number" and current_mode ~= off then
-            if not settings:readSetting(key) then
-                pcall(function() settings:saveSetting(key, current_mode) end)
-            end
-        end
-        pcall(function() footer:applyFooterMode(off) end)
-        if settings then
-            pcall(function() settings:saveSetting("reader_footer_mode", off) end)
-        end
-        if footer.refreshFooter then
-            pcall(function() footer:refreshFooter(true, true) end)
-        end
-        return
-    end
-
-    footer._typefolio_disabled = false
-    footer.disabled = false
-
     if custom_footer_enabled == true then
-        if ui.view.footer_visible == true or (footer.mode and footer.mode ~= off) then
+        local is_active = ui.view.footer_visible == true
+            or (type(footer.mode) == "number" and footer.mode ~= off)
+        if is_active then
             local current_mode = footer.mode
             if type(current_mode) ~= "number" or current_mode == off then
                 current_mode = settings and settings:readSetting("reader_footer_mode")
             end
             if settings and type(current_mode) == "number" and current_mode ~= off then
-                if not settings:readSetting(key) then
-                    pcall(function() settings:saveSetting(key, current_mode) end)
-                end
+                pcall(function() settings:saveSetting(key, current_mode) end)
             end
             pcall(function() footer:applyFooterMode(off) end)
             if settings then

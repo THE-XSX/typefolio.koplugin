@@ -28,7 +28,7 @@ end
 function Engine:apply(value, opts)
     opts = opts or {}
     local config = self.config.normalize(value)
-    local capabilities = type(self.get_capabilities) == "function" and self.get_capabilities() or nil
+    local capabilities = type(self.get_capabilities) == "function" and self.get_capabilities(config) or nil
     local plan = self.planner.plan(config, self.get_policy(), self.painter_available(), capabilities)
     local parts = {}
 

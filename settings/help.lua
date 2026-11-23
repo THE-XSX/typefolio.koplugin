@@ -53,11 +53,7 @@ function HelpSettings.subItems(ctx)
                     "",
                     tr("HELP_DIALOGUE"),
                     "",
-                    tr("HELP_BODY_TYPE"),
-                    "",
                     tr("HELP_CHAPTER_PAGEBREAK"),
-                    "",
-                    tr("HELP_PURE_BLACK"),
                 }
                 showInfo(table.concat(help_lines, "\n"))
             end,

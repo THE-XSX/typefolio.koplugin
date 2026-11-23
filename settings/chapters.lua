@@ -88,6 +88,7 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
             keep_menu_open = true,
             enabled_func = function()
                 return getChapterBoundary(ctx, boundary, "enabled") == true
+                    and getChapterBoundary(ctx, boundary, "style") == "custom"
             end,
             callback = function(touchmenu_instance)
                 local InputDialog = require("ui/widget/inputdialog")
@@ -122,7 +123,9 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
             end,
             keep_menu_open = true,
             enabled_func = function()
-                return getChapterBoundary(ctx, boundary, "enabled") == true
+                if getChapterBoundary(ctx, boundary, "enabled") ~= true then return false end
+                local st = getChapterBoundary(ctx, boundary, "style")
+                return st == "dots" or st == "custom"
             end,
             callback = function(touchmenu_instance)
                 UIManager:show(SpinWidget:new{
@@ -149,6 +152,7 @@ function ChapterSettings.boundaryItems(ctx, boundary, title)
             keep_menu_open = true,
             enabled_func = function()
                 return getChapterBoundary(ctx, boundary, "enabled") == true
+                    and getChapterBoundary(ctx, boundary, "style") ~= "custom"
             end,
             callback = function(touchmenu_instance)
                 UIManager:show(SpinWidget:new{

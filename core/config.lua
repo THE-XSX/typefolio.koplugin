@@ -70,6 +70,7 @@ Config.EMPHASIS_GAP_MAX = 32
 
 -- Chapter boundary decoration vocabularies and numeric bounds.
 Config.CHAPTER_STYLES = { "single", "double", "dots", "custom" }
+Config.CHAPTER_STYLE_ALIASES = { wave = "single", heart = "dots" }
 Config.CHAPTER_THICKNESS_MAX = 5
 Config.CHAPTER_COUNT_MAX = 20
 
@@ -120,13 +121,13 @@ Config.STATUS_SLOT_ALIASES = {
     pages_left_in_chapter = "pages_left_chapter",
 }
 Config.STATUS_DIVIDER_ALIASES = {
-    bars = "solid",
-    vertical_bar = "solid",
+    dots_big = "dots_small",
+    vertical_bar = "dashed",
+    bars = "dashed",
     slash = "dashed",
     slashes = "dashed",
     double_slash = "dashed",
     double_slashes = "dashed",
-    dots_big = "dots_small",
 }
 
 -- Legacy underline ids -> canonical { underline, dash_pattern }. Shared with
@@ -305,7 +306,6 @@ function Config.defaults()
         skip_headings = true,
         skip_blockquotes = true,
         folio_scene = "off",
-        disable_system_bars = false,
         awareness = clone(AWARENESS_DEFAULTS),
         semantic_drawing = clone(SEMANTIC_DEFAULTS),
         dialogue_painter = clone(DIALOGUE_PAINTER_DEFAULTS),
@@ -333,6 +333,13 @@ function Config.normalize(value)
     config.tweak_params = type(config.tweak_params) == "table" and config.tweak_params or {}
     config.tweaks.custom_hr_dashed = nil
     config.tweak_params.custom_hr_dashed = nil
+    -- Removed global body typography overrides (redundant with KOReader's native contrast/weight).
+    config.tweaks.body_bold = nil
+    config.tweaks.body_italic = nil
+    config.tweaks.pure_black = nil
+    config.tweak_params.body_bold = nil
+    config.tweak_params.body_italic = nil
+    config.tweak_params.pure_black = nil
     -- Renamed blockquote params: the menu once wrote bar_thickness/bg_tint while
     -- the CSS template reads bar/tint. Migrate any saved values so older
     -- settings keep working, then drop the dead keys.
@@ -348,32 +355,12 @@ function Config.normalize(value)
         bq_params.bg_tint = nil
     end
     local dlg_params = config.tweak_params.dialogue_style
-    if type(dlg_params) == "table" then
-        if dlg_params.font_family ~= nil then
-            dlg_params.font_family = Config.sanitizeFontFamily(dlg_params.font_family)
-        end
-        if dlg_params.font_scale ~= nil then
-            dlg_params.font_scale = clampedIntOr(dlg_params.font_scale, 70, 150, 100)
-        end
-        if dlg_params.text_depth ~= nil then
-            dlg_params.text_depth = clampedIntOr(dlg_params.text_depth, 40, 100, 100)
-        end
-        if dlg_params.font_weight ~= nil then
-            local valid_weights = { ["default"] = true, ["300"] = true, ["normal"] = true, ["600"] = true, ["bold"] = true, ["900"] = true }
-            if not valid_weights[tostring(dlg_params.font_weight)] then
-                dlg_params.font_weight = "default"
-            else
-                dlg_params.font_weight = tostring(dlg_params.font_weight)
-            end
-        end
-        if dlg_params.include_quotes ~= nil then
-            dlg_params.include_quotes = booleanOr(dlg_params.include_quotes, true)
-        end
+    if type(dlg_params) == "table" and dlg_params.font_family ~= nil then
+        dlg_params.font_family = Config.sanitizeFontFamily(dlg_params.font_family)
     end
     if config.skip_headings == nil then config.skip_headings = true end
     if config.skip_blockquotes == nil then config.skip_blockquotes = true end
     config.folio_scene = Config.FOLIO_SCENE_SET[config.folio_scene] and config.folio_scene or "off"
-    config.disable_system_bars = booleanOr(config.disable_system_bars, false)
 
     local semantic_source = type(config.semantic_drawing) == "table"
         and config.semantic_drawing or {}
@@ -429,9 +416,10 @@ function Config.normalize(value)
         or type(chapter_source["end"]) == "table"
     local function normalizeBoundary(source, enabled_default)
         source = type(source) == "table" and source or {}
+        local style = canonical(source.style, Config.CHAPTER_STYLE_ALIASES)
         return {
             enabled = booleanOr(source.enabled, enabled_default),
-            style = CHAPTER_STYLE_SET[source.style] and source.style or "single",
+            style = CHAPTER_STYLE_SET[style] and style or "single",
             thickness = boundaryThicknessOr(source.thickness, 1),
             char = type(source.char) == "string" and source.char ~= ""
                 and source.char or nil,

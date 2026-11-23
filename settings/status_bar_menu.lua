@@ -94,9 +94,9 @@ local PRESETS = {
         footer = { enabled = true, left = "time_left_chapter", center = "none", right = "progress_combo", divider_style = "none" },
     },
     wechat_duokan = {
-        name = "Kindle Native (Centered 12h time · Chapter time · Percent)",
-        header = { enabled = true, left = "none", center = "clock_12h", right = "none", divider_style = "none" },
-        footer = { enabled = true, left = "time_left_chapter", center = "none", right = "reading_percent", divider_style = "none" },
+        name = "Kindle Native (Centered time · Time left · Percent)",
+        header = { enabled = true, left = "none", center = "clock", right = "none", divider_style = "none" },
+        footer = { enabled = true, left = "time_left_book", center = "none", right = "reading_percent", divider_style = "none" },
     },
     classic_folio = {
         name = "Kobo Native (Centered chapter · Book and page · Progress bar)",
@@ -124,9 +124,9 @@ local PRESETS = {
         footer = { enabled = true, left = "chapter_title", center = "none", right = "reading_percent", divider_style = "none" },
     },
     wechat_reading = {
-        name = "WeRead Style (Chapter · Pages)",
-        header = { enabled = true, left = "chapter_title", center = "none", right = "none", divider_style = "none" },
-        footer = { enabled = true, left = "none", center = "none", right = "page_progress", divider_style = "none" },
+        name = "WeRead Style (Chapter · Time · Pages)",
+        header = { enabled = true, left = "chapter_title", center = "none", right = "none", divider_style = "none", hide_on_chapter_start = true },
+        footer = { enabled = true, left = "clock", center = "none", right = "page_progress", divider_style = "none" },
     },
     minimal_pages = {
         name = "Minimalist Pages (No header)",
@@ -206,6 +206,7 @@ function StatusBarMenu.applyPreset(ctx, bar, preset_id)
             target.right = half.right
             target.divider_style = half.divider_style
             target.divider_position = half.divider_position or "auto"
+            target.hide_on_chapter_start = (half.hide_on_chapter_start == true)
             if half.enabled ~= nil then
                 target.enabled = half.enabled
             end
@@ -383,11 +384,6 @@ local function toggleRow(ctx, bar, label, key, default_on, extra_enabled)
     }
 end
 
-local function isSystemDisabled(ctx)
-    local cfg = ctx and ctx.getConfig and ctx.getConfig(ctx.ui)
-    return cfg and cfg.disable_system_bars == true
-end
-
 -- The crengine "alt status bar" at the top of the page. 0 enables it, 1 disables it
 -- (crengine's own convention). It only exists for reflowable documents, and main.lua's
 -- applyStyle forces it off while the custom header is painting, so the row is disabled
@@ -406,21 +402,15 @@ local function nativeTopRow(ctx, bar)
     end
     return {
         text_func = function()
-            if isSystemDisabled(ctx) then
-                return T(tr("%1: %2"), tr("KOReader native top status bar"), tr("Disabled (system bars suppressed)"))
-            end
             local status = isOn() and tr("Enabled") or tr("Disabled")
             return T(tr("%1: %2"), tr("KOReader native top status bar"), status)
         end,
         keep_menu_open = true,
         enabled_func = function()
-            return configurable() ~= nil and not barOn(ctx, bar) and not isSystemDisabled(ctx)
+            return configurable() ~= nil and not barOn(ctx, bar)
         end,
-        checked_func = function()
-            return isOn() and not isSystemDisabled(ctx)
-        end,
+        checked_func = isOn,
         callback = function(touchmenu_instance)
-            if isSystemDisabled(ctx) then return end
             local conf = configurable()
             if not conf then return end
             local next_val = isOn() and 1 or 0
@@ -455,21 +445,13 @@ local function nativeBottomRow(ctx, bar)
     end
     return {
         text_func = function()
-            if isSystemDisabled(ctx) then
-                return T(tr("KOReader native bottom status bar: %1"), tr("Disabled (system bars suppressed)"))
-            end
             local status = isVisible() and tr("Visible") or tr("Hidden")
             return T(tr("KOReader native bottom status bar: %1"), status)
         end,
         keep_menu_open = true,
-        enabled_func = function()
-            return footer() ~= nil and not barOn(ctx, bar) and not isSystemDisabled(ctx)
-        end,
-        checked_func = function()
-            return isVisible() and not isSystemDisabled(ctx)
-        end,
+        enabled_func = function() return footer() ~= nil and not barOn(ctx, bar) end,
+        checked_func = isVisible,
         callback = function(touchmenu_instance)
-            if isSystemDisabled(ctx) then return end
             local f = footer()
             if not f then return end
             local off = f.mode_list.off or 0
@@ -506,44 +488,7 @@ function StatusBarMenu.items(ctx, bar, options)
     local on = function() return barOn(ctx, bar) end
     local cfg = function() return barConfig(ctx, bar) end
 
-    local items = {
-        {
-            text_func = function()
-                local status = on() and tr("Enabled") or tr("Disabled")
-                return T(tr("%1: %2"), tr(spec.toggle_label), status)
-            end,
-            keep_menu_open = true,
-            checked_func = on,
-            callback = function(touchmenu_instance)
-                local config = ctx.getConfig(ctx.ui)
-                config[bar] = config[bar] or {}
-                config[bar].enabled = not on()
-                ctx.applyStyle(config)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
-            end,
-            separator = true,
-        },
-        {
-            text = tr("Left slot"),
-            enabled_func = on,
-            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "left") end,
-        },
-        {
-            text = tr("Center slot"),
-            enabled_func = on,
-            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "center") end,
-        },
-        {
-            text = tr("Right slot"),
-            enabled_func = on,
-            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "right") end,
-            separator = true,
-        },
-        {
-            text = tr(spec.divider_label),
-            enabled_func = on,
-            sub_item_table_func = function() return StatusBarMenu.dividerItems(ctx, bar) end,
-        },
+    local advanced_items = {
         spinRow(ctx, {
             title = "Divider thickness",
             unit = "px",
@@ -600,6 +545,58 @@ function StatusBarMenu.items(ctx, bar, options)
             set = function(text) setParam(ctx, bar, "custom_text", text) end,
             separator = true,
         }),
+        toggleRow(ctx, bar, "Bold text", "font_bold", false),
+        -- No italic row: KOReader's TextWidget has no italic field, so font_italic could
+        -- never render. The key is still accepted by Config for older saved settings.
+        toggleRow(ctx, bar, "Hide on chapter start page", "hide_on_chapter_start", false),
+        toggleRow(ctx, bar, "Facing pages layout (Recto/Verso alternate)", "facing_pages", false),
+        toggleRow(ctx, bar, "Align to page text margin", "margin_inset", true),
+    }
+    advanced_items[#advanced_items].separator = true
+    if spec.native == "top" then
+        table.insert(advanced_items, nativeTopRow(ctx, bar))
+    else
+        table.insert(advanced_items, nativeBottomRow(ctx, bar))
+    end
+
+    local items = {
+        {
+            text_func = function()
+                local status = on() and tr("Enabled") or tr("Disabled")
+                return T(tr("%1: %2"), tr(spec.toggle_label), status)
+            end,
+            keep_menu_open = true,
+            checked_func = on,
+            callback = function(touchmenu_instance)
+                local config = ctx.getConfig(ctx.ui)
+                config[bar] = config[bar] or {}
+                config[bar].enabled = not on()
+                ctx.applyStyle(config)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            separator = true,
+        },
+        {
+            text = tr("Left slot"),
+            enabled_func = on,
+            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "left") end,
+        },
+        {
+            text = tr("Center slot"),
+            enabled_func = on,
+            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "center") end,
+        },
+        {
+            text = tr("Right slot"),
+            enabled_func = on,
+            sub_item_table_func = function() return StatusBarMenu.slotItems(ctx, bar, "right") end,
+            separator = true,
+        },
+        {
+            text = tr(spec.divider_label),
+            enabled_func = on,
+            sub_item_table_func = function() return StatusBarMenu.dividerItems(ctx, bar) end,
+        },
         spinRow(ctx, {
             title = spec.font_title,
             unit = "pt",
@@ -613,9 +610,6 @@ function StatusBarMenu.items(ctx, bar, options)
             get = function() return cfg().font_size or barDefault(bar, "font_size") end,
             set = function(value) setParam(ctx, bar, "font_size", value) end,
         }),
-        toggleRow(ctx, bar, "Bold text", "font_bold", false),
-        -- No italic row: KOReader's TextWidget has no italic field, so font_italic could
-        -- never render. The key is still accepted by Config for older saved settings.
         spinRow(ctx, {
             title = spec.offset_title,
             unit = "px",
@@ -629,10 +623,12 @@ function StatusBarMenu.items(ctx, bar, options)
             enabled_func = on,
             get = function() return cfg()[spec.offset_key] or barDefault(bar, spec.offset_key) end,
             set = function(value) setParam(ctx, bar, spec.offset_key, value) end,
+            separator = true,
         }),
-        toggleRow(ctx, bar, "Hide on chapter start page", "hide_on_chapter_start", false),
-        toggleRow(ctx, bar, "Facing pages layout (Recto/Verso alternate)", "facing_pages", false),
-        toggleRow(ctx, bar, "Align to page text margin", "margin_inset", true),
+        {
+            text = tr("More appearance & options"),
+            sub_item_table = advanced_items,
+        },
     }
     if not options or options.include_presets ~= false then
         table.insert(items, 2, {
@@ -641,25 +637,20 @@ function StatusBarMenu.items(ctx, bar, options)
             sub_item_table_func = function() return StatusBarMenu.presetItems(ctx, bar) end,
         })
     end
-    items[#items].separator = true
-
-    if spec.native == "top" then
-        table.insert(items, nativeTopRow(ctx, bar))
-    else
-        table.insert(items, nativeBottomRow(ctx, bar))
-    end
 
     return items
 end
 
 -- The two bars form one reading chrome. Keep their shared presets in one menu and
--- retain separate submenus for detailed top/bottom adjustments.
+-- retain separate submenus (with quick checkmark toggles) for detailed top/bottom adjustments.
 function StatusBarMenu.combinedItems(ctx)
     local tr = ctx.tr
-    local T = ctx.T or function(fmt, a, b) return (fmt:gsub("%%1", tostring(a))):gsub("%%2", tostring(b)) end
-    local function isSystemBarsDisabled()
-        local cfg = ctx and ctx.getConfig and ctx.getConfig(ctx.ui)
-        return cfg and cfg.disable_system_bars == true
+    local function toggleBar(bar, touchmenu_instance)
+        local config = ctx.getConfig(ctx.ui)
+        config[bar] = config[bar] or {}
+        config[bar].enabled = not (config[bar].enabled == true)
+        ctx.applyStyle(config)
+        if touchmenu_instance then touchmenu_instance:updateItems() end
     end
     return {
         {
@@ -674,30 +665,24 @@ function StatusBarMenu.combinedItems(ctx)
         },
         {
             text = tr("Custom top header"),
+            keep_menu_open = true,
+            checked_func = function() return barOn(ctx, "custom_header") end,
+            checkmark_callback = function(touchmenu_instance)
+                toggleBar("custom_header", touchmenu_instance)
+            end,
             sub_item_table_func = function()
                 return StatusBarMenu.items(ctx, "custom_header", { include_presets = false })
             end,
         },
         {
             text = tr("Custom bottom footer"),
+            keep_menu_open = true,
+            checked_func = function() return barOn(ctx, "custom_footer") end,
+            checkmark_callback = function(touchmenu_instance)
+                toggleBar("custom_footer", touchmenu_instance)
+            end,
             sub_item_table_func = function()
                 return StatusBarMenu.items(ctx, "custom_footer", { include_presets = false })
-            end,
-            separator = true,
-        },
-        {
-            text_func = function()
-                local status = isSystemBarsDisabled() and tr("Enabled") or tr("Disabled")
-                return T(tr("%1: %2"), tr("Disable system header & footer"), status)
-            end,
-            help_text = tr("Completely suppresses KOReader's native top and bottom status bars, disabling touch triggers to prevent accidental popups and reclaim full screen for reading."),
-            keep_menu_open = true,
-            checked_func = isSystemBarsDisabled,
-            callback = function(touchmenu_instance)
-                local config = ctx.getConfig(ctx.ui)
-                config.disable_system_bars = not isSystemBarsDisabled()
-                ctx.applyStyle(config)
-                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         },
     }

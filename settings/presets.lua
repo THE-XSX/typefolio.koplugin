@@ -365,7 +365,12 @@ function PresetsSettings.items(ctx)
 
     local keys = {}
     for key in pairs(CSSTemplates.presets) do table.insert(keys, key) end
-    table.sort(keys)
+    table.sort(keys, function(a, b)
+        local pa, pb = CSSTemplates.presets[a], CSSTemplates.presets[b]
+        local oa, ob = (pa and pa.order) or 999, (pb and pb.order) or 999
+        if oa ~= ob then return oa < ob end
+        return a < b
+    end)
     local items = {}
     for _, key in ipairs(keys) do
         local preset = CSSTemplates.presets[key]
@@ -374,20 +379,45 @@ function PresetsSettings.items(ctx)
             keep_menu_open = true,
             callback = function(touchmenu_instance)
                 -- Start from the reader's current config and let the preset overwrite only
-                -- what it actually defines. This used to be a hand-written list of the keys
-                -- worth carrying over, which meant every setting added afterwards -- the
-                -- dialogue and emphasis painters, "skip blockquotes" -- was absent from the
-                -- table and Config.normalize quietly reset it to its default the first time
-                -- a preset was applied. getConfig already returns a normalized copy, so
-                -- mutating it here cannot touch the stored config.
+                -- what it actually defines, preserving unrelated toggles (dialogue/emphasis
+                -- painters, skip_headings, skip_blockquotes, awareness, etc.).
                 local config = getConfig(ui)
                 config.underline = preset.underline
                 config.dash_pattern = preset.dash_pattern or "normal"
-                -- A preset is not a KOReader-settings payload; drop anything left over.
-                config.koreader_settings = {}
                 config.tweaks = {}
-                for tweak, enabled in pairs(preset.tweaks) do
+                for tweak, enabled in pairs(preset.tweaks or {}) do
                     config.tweaks[tweak] = enabled
+                end
+                if type(preset.tweak_params) == "table" then
+                    config.tweak_params = config.tweak_params or {}
+                    for tweak, params in pairs(preset.tweak_params) do
+                        if type(params) == "table" then
+                            local copy = {}
+                            for pk, pv in pairs(params) do copy[pk] = pv end
+                            config.tweak_params[tweak] = copy
+                        end
+                    end
+                end
+                for _, bar in ipairs({ "custom_header", "custom_footer" }) do
+                    local spec = preset[bar]
+                    if type(spec) == "table" then
+                        config[bar] = config[bar] or {}
+                        for sk, sv in pairs(spec) do
+                            config[bar][sk] = sv
+                        end
+                    end
+                end
+                config.koreader_settings = {}
+                if type(preset.koreader_settings) == "table" then
+                    for kk, kv in pairs(preset.koreader_settings) do
+                        if type(kv) == "table" then
+                            local list = {}
+                            for idx, item_val in ipairs(kv) do list[idx] = item_val end
+                            config.koreader_settings[kk] = list
+                        else
+                            config.koreader_settings[kk] = kv
+                        end
+                    end
                 end
                 applyStyle(config)
                 notify(T(tr("Applied preset: %1"), tr(preset.name)))
@@ -395,6 +425,18 @@ function PresetsSettings.items(ctx)
             end,
         })
     end
+    if #items > 0 then
+        items[#items].separator = true
+    end
+    table.insert(items, {
+        text = tr("Custom presets"),
+        sub_item_table_func = function() return PresetsSettings.customPresetItems(ctx) end,
+    })
+    table.insert(items, {
+        text = tr("Import / export presets"),
+        sub_item_table_func = function() return PresetsSettings.presetFileItems(ctx) end,
+        separator = true,
+    })
     table.insert(items, {
         text = tr("Restore default typesetting"),
         keep_menu_open = true,
@@ -417,14 +459,6 @@ function PresetsSettings.items(ctx)
             notify(tr("All typesetting tweaks reset"))
             if touchmenu_instance then touchmenu_instance:updateItems() end
         end,
-    })
-    table.insert(items, {
-        text = tr("Custom presets"),
-        sub_item_table_func = function() return PresetsSettings.customPresetItems(ctx) end,
-    })
-    table.insert(items, {
-        text = tr("Import / export presets"),
-        sub_item_table_func = function() return PresetsSettings.presetFileItems(ctx) end,
     })
     return items
 end

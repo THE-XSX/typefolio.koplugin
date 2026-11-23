@@ -183,7 +183,7 @@ end
 -- Processes a contiguous slice of tokens within one block context (no block tags inside,
 -- only text/special/inline tags). Wraps matched paired quotes in <span class="tf-dlg">,
 -- splitting cleanly across inline tags so every tag stays properly nested.
-local function tagBlockSlice(tokens, first_idx, last_idx, pairs_list, include_quotes)
+local function tagBlockSlice(tokens, first_idx, last_idx, pairs_list)
     -- Collect only text tokens with their slice offsets so we can match paired quotes
     -- across inline tags (e.g. “He said <em>quietly</em>.”) and verify every opener has
     -- a matching closer inside the same block before emitting any <span>.
@@ -236,11 +236,7 @@ local function tagBlockSlice(tokens, first_idx, last_idx, pairs_list, include_qu
             scan = oe + 1
         else
             if cs > oe + 1 then
-                if include_quotes == false then
-                    table.insert(spans, { first = oe + 1, last = cs - 1 })
-                else
-                    table.insert(spans, { first = os, last = ce })
-                end
+                table.insert(spans, { first = os, last = ce })
             end
             scan = ce + 1
         end
@@ -317,10 +313,6 @@ end
 function EpubDialogueTagger.tagXhtml(html, lang_or_opts)
     if type(html) ~= "string" or html == "" then return html or "", 0 end
     local lang = type(lang_or_opts) == "table" and lang_or_opts.lang or lang_or_opts
-    local include_quotes = true
-    if type(lang_or_opts) == "table" and lang_or_opts.include_quotes == false then
-        include_quotes = false
-    end
     local pairs_list = QUOTE_PAIRS_BY_LANG[lang or "all"] or QUOTE_PAIRS_BY_LANG.all
     -- Quick check: if none of the opening marks appear anywhere, return untouched.
     local any_mark = false
@@ -342,7 +334,7 @@ function EpubDialogueTagger.tagXhtml(html, lang_or_opts)
     local function flushSlice(up_to)
         if not slice_start then return end
         if up_to >= slice_start then
-            local chunk, count = tagBlockSlice(tokens, slice_start, up_to, pairs_list, include_quotes)
+            local chunk, count = tagBlockSlice(tokens, slice_start, up_to, pairs_list)
             table.insert(out, chunk)
             total_matches = total_matches + count
         end
@@ -395,7 +387,8 @@ function EpubDialogueTagger.tagXhtml(html, lang_or_opts)
     return table.concat(out), total_matches
 end
 
--- Simple 32-bit FNV-1a hash in pure Lua (works identically on LuaJIT & Lua 5.4).
+-- Exact 32-bit FNV-1a hash in pure Lua (uses 16-bit split multiplication so intermediate
+-- products stay below 2^40, guaranteeing bit-identical output on LuaJIT doubles and Lua 5.4).
 local function fnv1aHex(str)
     local hash = 2166136261
     for i = 1, #str do
@@ -410,7 +403,9 @@ local function fnv1aHex(str)
             c = math.floor(c / 2)
             bit = bit * 2
         end
-        hash = (res * 16777619) % 4294967296
+        local lo = res % 65536
+        local hi = math.floor(res / 65536)
+        hash = ((lo * 16777619) + (((hi * 16777619) % 65536) * 65536)) % 4294967296
     end
     return string.format("%08x", hash)
 end
@@ -424,7 +419,6 @@ end
 function EpubDialogueTagger.buildCachePath(source_path, data_dir, opts)
     opts = opts or {}
     local lang = opts.lang or "all"
-    local include_quotes = opts.include_quotes ~= false and "1" or "0"
     local size = tostring(opts.size or 0)
     local mtime = tostring(opts.mtime or 0)
     local filename = (source_path or "book.epub"):match("([^/\\]+)$") or "book.epub"
@@ -434,40 +428,12 @@ function EpubDialogueTagger.buildCachePath(source_path, data_dir, opts)
         :gsub("%s+", "_")
     if stem == "" then stem = "book" end
     if #stem > 60 then stem = stem:sub(1, 60) end
-    local hash = fnv1aHex(tostring(source_path) .. "|" .. size .. "|" .. mtime .. "|" .. lang .. "|" .. include_quotes)
+    local hash = fnv1aHex(tostring(source_path) .. "|" .. size .. "|" .. mtime .. "|" .. lang)
     return EpubDialogueTagger.cacheDir(data_dir) .. "/" .. stem .. "_" .. hash .. EpubDialogueTagger.SUFFIX
 end
 
 function EpubDialogueTagger.isTaggedCopy(path)
     return type(path) == "string" and path:lower():match("%.tf_dlg%.epub$") ~= nil
-end
-
-function EpubDialogueTagger.getCachedCopyPath(source_path, data_dir, opts, lfs_mod)
-    local path = EpubDialogueTagger.buildCachePath(source_path, data_dir, opts)
-    if not path then return nil end
-    local ok_lfs, lfs = true, lfs_mod
-    if not lfs then
-        ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
-        if not ok_lfs then ok_lfs, lfs = pcall(require, "lfs") end
-    end
-    if ok_lfs and lfs and type(lfs.attributes) == "function" then
-        local attr = lfs.attributes(path)
-        if attr and (attr.size or 0) > 0 then
-            return path
-        end
-    else
-        local f = io.open(path, "rb")
-        if f then
-            local size = f:seek("end") or 0
-            f:close()
-            if size > 0 then return path end
-        end
-    end
-    return nil
-end
-
-function EpubDialogueTagger.hasCachedCopy(source_path, data_dir, opts, lfs_mod)
-    return EpubDialogueTagger.getCachedCopyPath(source_path, data_dir, opts, lfs_mod) ~= nil
 end
 
 local function isHtmlEntry(name)
@@ -478,74 +444,99 @@ local function isHtmlEntry(name)
         or lower:match("%.htm$") ~= nil
 end
 
+local function isRegularFileEntry(entry)
+    if type(entry) ~= "table" or type(entry.path) ~= "string" or entry.path == "" then
+        return false
+    end
+    if entry.path:sub(-1) == "/" then return false end
+    if entry.mode == nil or entry.mode == "file" then return true end
+    -- libarchive / POSIX S_IFMT regular file bit (0100000 = 32768)
+    if type(entry.mode) == "number" then
+        return math.floor(entry.mode / 32768) % 2 == 1
+    end
+    return false
+end
+
 -- Archive backend using KOReader's built-in ffi/archiver (libarchive).
-local function processWithArchiver(source_path, tmp_dest, opts_or_lang, on_progress)
-    local tag_opts = type(opts_or_lang) == "table" and opts_or_lang or { lang = opts_or_lang }
+-- Streams entries one by one instead of buffering the entire EPUB in RAM so large
+-- illustrated books (50–200 MB) never trigger OOM on low-RAM e-ink devices.
+local function processWithArchiver(source_path, tmp_dest, lang, on_progress)
     local ok_arch, Archiver = pcall(require, "ffi/archiver")
     if not ok_arch or type(Archiver) ~= "table"
             or not Archiver.Reader or not Archiver.Writer then
         return nil, "archiver_unavailable"
     end
 
+    -- First lightweight metadata pass: count file entries and grab the tiny mimetype entry
+    -- (~20 bytes) so it can always be written first and uncompressed per EPUB spec.
+    local scan_reader = Archiver.Reader:new()
+    if not scan_reader:open(source_path) then
+        return nil, "failed to open source epub"
+    end
+    local total = 0
+    local mimetype_data = nil
+    for entry in scan_reader:iterate() do
+        if isRegularFileEntry(entry) then
+            total = total + 1
+            if entry.path == "mimetype" then
+                mimetype_data = scan_reader:extractToMemory(entry.index) or "application/epub+zip"
+            end
+        end
+    end
+    scan_reader:close()
+
     local reader = Archiver.Reader:new()
     if not reader:open(source_path) then
         return nil, "failed to open source epub"
     end
 
-    local entries = {}
-    for entry in reader:iterate() do
-        if entry.mode == "file" then
-            local data = reader:extractToMemory(entry.index)
-            table.insert(entries, {
-                path = entry.path,
-                data = data or "",
-            })
-        end
-    end
-    reader:close()
-
-    -- EPUB specification requires "mimetype" to be the first entry and stored uncompressed.
-    table.sort(entries, function(a, b)
-        if a.path == "mimetype" then return true end
-        if b.path == "mimetype" then return false end
-        return a.path < b.path
-    end)
-
     local writer = Archiver.Writer:new()
     local open_ok = writer:open(tmp_dest, "zip")
     if not open_ok then
+        reader:close()
         return nil, "failed to create output epub"
     end
 
     local stats = { files_scanned = 0, files_modified = 0, quotes_tagged = 0 }
-    local total = #entries
+    local processed = 0
     local write_ok, write_err = pcall(function()
-        for i, item in ipairs(entries) do
-            local data = item.data
-            if isHtmlEntry(item.path) then
-                stats.files_scanned = stats.files_scanned + 1
-                local tagged, count = EpubDialogueTagger.tagXhtml(data, tag_opts)
-                if count > 0 then
-                    data = tagged
-                    stats.files_modified = stats.files_modified + 1
-                    stats.quotes_tagged = stats.quotes_tagged + count
-                end
+        if mimetype_data ~= nil then
+            if type(writer.setZipCompressionStore) == "function" then
+                pcall(writer.setZipCompressionStore, writer)
             end
-            if item.path == "mimetype" and writer.setZipCompressionStore then
-                writer:setZipCompressionStore()
-                writer:addFileFromMemory(item.path, data)
-                if writer.setZipCompressionDeflate then
-                    writer:setZipCompressionDeflate()
-                end
-            else
-                writer:addFileFromMemory(item.path, data)
+            writer:addFileFromMemory("mimetype", mimetype_data)
+            if type(writer.setZipCompressionDeflate) == "function" then
+                pcall(writer.setZipCompressionDeflate, writer)
             end
+            processed = processed + 1
             if type(on_progress) == "function" then
-                on_progress(i, total)
+                on_progress(processed, total)
+            end
+        end
+
+        for entry in reader:iterate() do
+            if isRegularFileEntry(entry) and entry.path ~= "mimetype" then
+                local data = reader:extractToMemory(entry.index) or ""
+                if isHtmlEntry(entry.path) then
+                    stats.files_scanned = stats.files_scanned + 1
+                    local tagged, count = EpubDialogueTagger.tagXhtml(data, lang)
+                    if count > 0 then
+                        data = tagged
+                        stats.files_modified = stats.files_modified + 1
+                        stats.quotes_tagged = stats.quotes_tagged + count
+                    end
+                end
+                writer:addFileFromMemory(entry.path, data)
+                data = nil
+                processed = processed + 1
+                if type(on_progress) == "function" then
+                    on_progress(processed, total)
+                end
             end
         end
     end)
-    writer:close()
+    pcall(reader.close, reader)
+    pcall(writer.close, writer)
     if not write_ok then
         os.remove(tmp_dest)
         return nil, tostring(write_err)
@@ -554,8 +545,7 @@ local function processWithArchiver(source_path, tmp_dest, opts_or_lang, on_progr
 end
 
 -- Archive backend using pluggable zip_io (for tests or alternative runtimes).
-local function processWithCustomIO(zip_io, source_path, tmp_dest, opts_or_lang, on_progress)
-    local tag_opts = type(opts_or_lang) == "table" and opts_or_lang or { lang = opts_or_lang }
+local function processWithCustomIO(zip_io, source_path, tmp_dest, lang, on_progress)
     local entries, read_err = zip_io.readAll(source_path)
     if not entries then return nil, read_err or "failed to read epub" end
 
@@ -572,7 +562,7 @@ local function processWithCustomIO(zip_io, source_path, tmp_dest, opts_or_lang, 
         local data = item.data or ""
         if isHtmlEntry(item.path) then
             stats.files_scanned = stats.files_scanned + 1
-            local tagged, count = EpubDialogueTagger.tagXhtml(data, tag_opts)
+            local tagged, count = EpubDialogueTagger.tagXhtml(data, lang)
             if count > 0 then
                 data = tagged
                 stats.files_modified = stats.files_modified + 1
@@ -618,14 +608,15 @@ function EpubDialogueTagger.processEpub(source_path, dest_path, opts)
     local remove_fn = (zip_io and zip_io.remove) or os.remove
     local rename_fn = (zip_io and zip_io.rename) or os.rename
 
+    local lang = opts.lang or "all"
     local tmp_dest = dest_path .. ".tmp"
     remove_fn(tmp_dest)
 
     local stats, err
     if zip_io then
-        stats, err = processWithCustomIO(zip_io, source_path, tmp_dest, opts, opts.on_progress)
+        stats, err = processWithCustomIO(zip_io, source_path, tmp_dest, lang, opts.on_progress)
     else
-        stats, err = processWithArchiver(source_path, tmp_dest, opts, opts.on_progress)
+        stats, err = processWithArchiver(source_path, tmp_dest, lang, opts.on_progress)
     end
     if not stats then
         remove_fn(tmp_dest)
@@ -668,20 +659,26 @@ function EpubDialogueTagger.listCachedCopies(data_dir, lfs_mod)
     return files, total_bytes, #files
 end
 
-function EpubDialogueTagger.clearCache(data_dir, lfs_mod)
+function EpubDialogueTagger.clearCache(data_dir, lfs_mod, exclude_path, remove_fn)
     local files = EpubDialogueTagger.listCachedCopies(data_dir, lfs_mod)
     local removed = 0
     local freed_bytes = 0
+    local skipped_active = 0
+    local do_remove = type(remove_fn) == "function" and remove_fn or os.remove
+    local normalized_exclude = type(exclude_path) == "string" and exclude_path:gsub("\\", "/") or nil
     for _, item in ipairs(files) do
-        if item.name:lower():match("%.tf_dlg%.epub$") and not item.name:find("[/\\]") then
-            local ok = os.remove(item.path)
+        local normalized_item = item.path:gsub("\\", "/")
+        if normalized_exclude and normalized_item == normalized_exclude then
+            skipped_active = skipped_active + 1
+        elseif item.name:lower():match("%.tf_dlg%.epub$") and not item.name:find("[/\\]") then
+            local ok = do_remove(item.path)
             if ok then
                 removed = removed + 1
                 freed_bytes = freed_bytes + (tonumber(item.size) or 0)
             end
         end
     end
-    return removed, freed_bytes
+    return removed, freed_bytes, skipped_active
 end
 
 return EpubDialogueTagger

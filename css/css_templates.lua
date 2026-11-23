@@ -27,9 +27,8 @@ CSSTemplates.defaults = {
 local function buildExcludeSelectors(skip_headings, skip_blockquotes)
     local exclude_selectors = {}
     if skip_headings then
-        table.insert(exclude_selectors, "h1, h2, h3, h4, h5, h6")
         table.insert(exclude_selectors, "h1 span, h2 span, h3 span, h4 span, h5 span, h6 span")
-        table.insert(exclude_selectors, "h1 em, h1 i, h1 u, h1 mark, h2 em, h2 i, h2 u, h2 mark, h3 em, h3 i, h3 u, h3 mark")
+        table.insert(exclude_selectors, "h1 em, h1 i, h1 u, h1 mark, h2 em, h2 i, h2 u, h2 mark, h3 em, h3 i, h3 u, h3 mark, h4 em, h4 i, h4 u, h4 mark, h5 em, h5 i, h5 u, h5 mark, h6 em, h6 i, h6 u, h6 mark")
         table.insert(exclude_selectors, 'p[align="center"] span, p[align="CENTER"] span, p[align="centre"] span, p[align="middle"] span')
         table.insert(exclude_selectors, ".title span, .chapter-title span, .chaptertitle span, p.center span, div.center span")
         table.insert(exclude_selectors, 'p[style*="center"] span, p[style*="CENTER"] span')
@@ -165,34 +164,21 @@ end
 -- 高级排版特效库
 -- 每个特效是 function(params) -> css；params 缺省时由各自的 defaults 兜底。
 CSSTemplates.tweak_defaults = {
-    dialogue_style = {
-        tint = true,
-        tint_level = "light",
-        bold = false,
-        italic = false,
-        font_family = "",
-        font_scale = 100,
-        text_depth = 100,
-        font_weight = "default",
-        include_quotes = true,
-    },
+    dialogue_style = { tint = true, tint_level = "light", bold = false, italic = false, font_family = "" },
     header_border = { border = "both", line_style = "solid", thickness = 1, centered = true,
         include_centered = true },
     chapter_pagebreak = { include_centered = true },
+    paragraph_spacing = { gap = 0.45 },
     blockquote_box = { bar = 5, tint = "light", italic = true },
     drop_caps = { scale = 2.1, bold = true },
-    pure_black = {},
-    body_bold = {},
-    body_italic = {},
 }
 
 -- 参数取值域，菜单与模板共用一份，避免两处各写各的
 CSSTemplates.tweak_options = {
     tint_level = { "light", "medium", "strong" },
     line_style = { "solid", "dashed", "dotted" },
-    border = { "both", "bottom", "top", "none" },
+    border = { "both", "bottom", "top", "left", "none" },
     tint = { "none", "light", "medium" },
-    font_weight = { "default", "300", "normal", "600", "bold", "900" },
 }
 
 local TINT_COLORS = { none = nil, light = "#e0e0e0", medium = "#c8c8c8" }
@@ -237,9 +223,6 @@ CSSTemplates.layout_tweaks = {
         if italic == nil then italic = defaults.italic end
         local tint_level = (params and params.tint_level) or defaults.tint_level
         local font_family = Config.sanitizeFontFamily(params and params.font_family or defaults.font_family)
-        local font_scale = (params and tonumber(params.font_scale)) or defaults.font_scale
-        local text_depth = (params and tonumber(params.text_depth)) or defaults.text_depth
-        local font_weight = (params and params.font_weight) or defaults.font_weight
 
         local tint_colors = {
             light  = "rgba(0, 0, 0, 0.08)",
@@ -251,20 +234,11 @@ CSSTemplates.layout_tweaks = {
         -- font alone does not forcibly reset nested <em>/<strong> or add unwanted padding.
         local decls = {}
         if font_family ~= "" then
-            -- Single chosen family + generic fallback: avoids long CJK fallback chains
-            -- that would load multiple heavy font files into e-ink RAM.
-            table.insert(decls, string.format('font-family: "%s", serif !important;', font_family))
+            -- Omit a generic ", serif" fallback so crengine uses KOReader's configured
+            -- CJK fallback font chain cleanly instead of substituting a CJK-incomplete serif.
+            table.insert(decls, string.format('font-family: "%s" !important;', font_family))
         end
-        if font_scale and font_scale >= 70 and font_scale <= 150 and font_scale ~= 100 then
-            table.insert(decls, string.format("font-size: %d%% !important;", math.floor(font_scale + 0.5)))
-        end
-        if text_depth and text_depth >= 40 and text_depth < 100 then
-            local gray_byte = math.floor((100 - text_depth) * 2.55 + 0.5)
-            table.insert(decls, string.format("color: #%02x%02x%02x !important;", gray_byte, gray_byte, gray_byte))
-        end
-        if font_weight and font_weight ~= "default" then
-            table.insert(decls, string.format("font-weight: %s !important;", font_weight))
-        elseif bold then
+        if bold then
             table.insert(decls, "font-weight: bold !important;")
         end
         if italic then
@@ -336,17 +310,34 @@ CSSTemplates.layout_tweaks = {
 
         local rule = string.format("%dpx %s #000000 !important;", thickness, style)
         local decls = {}
-        table.insert(decls, (border == "both" or border == "top")
-            and ("border-top: " .. rule) or "border-top: none !important;")
-        table.insert(decls, (border == "both" or border == "bottom")
-            and ("border-bottom: " .. rule) or "border-bottom: none !important;")
-        table.insert(decls, string.format("text-align: %s !important;",
-            centered and "center" or "left"))
-        -- 边框为"无"时不必占位留白，也不必收窄——否则只改了版面却什么都看不见
-        if border ~= "none" then
-            table.insert(decls, "padding: 8px 0 !important;")
-            table.insert(decls, "margin: 18px auto !important;")
-            table.insert(decls, "width: 85% !important;")
+        if border == "left" then
+            -- KOBO-inspired left vertical bar beside a flush-left chapter title
+            table.insert(decls, "border-top: none !important;")
+            table.insert(decls, "border-bottom: none !important;")
+            table.insert(decls, "border-left: " .. rule)
+            table.insert(decls, string.format("text-align: %s !important;",
+                centered and "center" or "left"))
+            table.insert(decls, "padding: 0.08em 0 0.08em 0.55em !important;")
+            table.insert(decls, "margin: 1.5em 0 1.8em 0 !important;")
+        else
+            table.insert(decls, (border == "both" or border == "top")
+                and ("border-top: " .. rule) or "border-top: none !important;")
+            table.insert(decls, (border == "both" or border == "bottom")
+                and ("border-bottom: " .. rule) or "border-bottom: none !important;")
+            table.insert(decls, "border-left: none !important;")
+            table.insert(decls, string.format("text-align: %s !important;",
+                centered and "center" or "left"))
+            -- 边框为"无"时不必占位留白，也不必收窄——否则只改了版面却什么都看不见
+            if border == "bottom" and not centered then
+                -- WeRead-style flush-left heading with full-width thin bottom rule
+                table.insert(decls, "padding: 0 0 0.45em 0 !important;")
+                table.insert(decls, "margin: 1.4em 0 1.3em 0 !important;")
+                table.insert(decls, "width: 100% !important;")
+            elseif border ~= "none" then
+                table.insert(decls, "padding: 8px 0 !important;")
+                table.insert(decls, "margin: 18px auto !important;")
+                table.insert(decls, "width: 85% !important;")
+            end
         end
 
         local css = string.format([[
@@ -373,13 +364,32 @@ CSSTemplates.layout_tweaks = {
         %s {
             border-top: none !important;
             border-bottom: none !important;
+            border-left: none !important;
             padding-top: 0 !important;
+            padding-left: 0 !important;
             margin-top: 0 !important;
         }
     ]], centeredTitleSelectors(), table.concat(decls, "\n            "),
                 centeredTitlePairs())
         end
         return css
+    end,
+
+    paragraph_spacing = function(params)
+        local defaults = CSSTemplates.tweak_defaults.paragraph_spacing
+        local gap = tonumber(params and params.gap)
+        if gap == nil then gap = defaults.gap end
+        if gap < 0 then gap = 0 elseif gap > 1.5 then gap = 1.5 end
+        return string.format([[
+        /* 段落间距 (em 相对单位，随字号自动等比缩放) */
+        p {
+            margin-top: 0 !important;
+            margin-bottom: %.2fem !important;
+        }
+        blockquote p:last-child {
+            margin-bottom: 0 !important;
+        }
+    ]], gap)
     end,
 
     drop_caps = function(params)
@@ -492,41 +502,156 @@ CSSTemplates.layout_tweaks = {
         end
         return heading_css
     end,
-
-    pure_black = function()
-        return [[
-        /* Force pure black text for higher e-ink contrast */
-        body, p, div, span, li, a {
-            color: #000000 !important;
-        }
-    ]]
-    end,
-
-    body_bold = function()
-        return [[
-        /* Global body bold via CSS; headings are not selected so original weight stays */
-        p, li, td, th, blockquote,
-        p span, p em, p i, p u, p a, p font, p b, p strong,
-        li span, blockquote p, blockquote span, div > span {
-            font-weight: bold !important;
-        }
-    ]]
-    end,
-
-    body_italic = function()
-        return [[
-        /* Global body italic via CSS; headings are not selected so original style stays */
-        p, li, td, th, blockquote,
-        p span, p em, p i, p u, p a, p font, p b, p strong,
-        li span, blockquote p, blockquote span, div > span {
-            font-style: italic !important;
-        }
-    ]]
-    end,
 }
 
--- 组合预设 (Presets)
--- Intentionally empty: users manage custom presets (and may mark one as default for new books).
-CSSTemplates.presets = {}
+-- 内置全局平台风格预设 (Built-in global platform presets)
+-- Calibrated from real device screenshots (WeRead, Kindle Native, KOBO Native).
+-- Applying a global preset configures typography + margins + matching status bar;
+-- readers can still swap the status bar independently anytime under "Status bar".
+CSSTemplates.presets = {
+    weread = {
+        order = 1,
+        name = "WeRead Style",
+        underline = "none",
+        dash_pattern = "normal",
+        tweaks = {
+            paragraph_spacing = true,
+            header_border = true,
+            chapter_pagebreak = true,
+        },
+        tweak_params = {
+            paragraph_spacing = { gap = 0.40 },
+            header_border = {
+                border = "bottom",
+                line_style = "solid",
+                thickness = 1,
+                centered = false,
+                include_centered = true,
+            },
+            chapter_pagebreak = { include_centered = true },
+        },
+        koreader_settings = {
+            copt_font_size = 22,
+            copt_line_spacing = 158,
+            copt_h_page_margins = { 22, 22 },
+            copt_t_page_margin = 30,
+            copt_b_page_margin = 30,
+            copt_sync_t_b_page_margins = 1,
+        },
+        custom_header = {
+            enabled = true,
+            preset = "wechat_reading",
+            left = "chapter_title",
+            center = "none",
+            right = "none",
+            divider_style = "none",
+            divider_position = "auto",
+            hide_on_chapter_start = true,
+        },
+        custom_footer = {
+            enabled = true,
+            preset = "wechat_reading",
+            left = "clock",
+            center = "none",
+            right = "page_progress",
+            divider_style = "none",
+            divider_position = "auto",
+            hide_on_chapter_start = false,
+        },
+    },
+    kindle = {
+        order = 2,
+        name = "Kindle Native Style",
+        underline = "none",
+        dash_pattern = "normal",
+        tweaks = {
+            paragraph_spacing = true,
+            chapter_pagebreak = true,
+        },
+        tweak_params = {
+            paragraph_spacing = { gap = 0.60 },
+            chapter_pagebreak = { include_centered = true },
+        },
+        koreader_settings = {
+            copt_font_size = 21,
+            copt_line_spacing = 142,
+            copt_h_page_margins = { 12, 12 },
+            copt_t_page_margin = 26,
+            copt_b_page_margin = 26,
+            copt_sync_t_b_page_margins = 1,
+        },
+        custom_header = {
+            enabled = true,
+            preset = "wechat_duokan",
+            left = "none",
+            center = "clock",
+            right = "none",
+            divider_style = "none",
+            divider_position = "auto",
+            hide_on_chapter_start = false,
+        },
+        custom_footer = {
+            enabled = true,
+            preset = "wechat_duokan",
+            left = "time_left_book",
+            center = "none",
+            right = "reading_percent",
+            divider_style = "none",
+            divider_position = "auto",
+            hide_on_chapter_start = false,
+        },
+    },
+    kobo = {
+        order = 3,
+        name = "Kobo Native Style",
+        underline = "none",
+        dash_pattern = "normal",
+        tweaks = {
+            paragraph_spacing = true,
+            header_border = true,
+            chapter_pagebreak = true,
+        },
+        tweak_params = {
+            paragraph_spacing = { gap = 0.85 },
+            header_border = {
+                border = "left",
+                line_style = "solid",
+                thickness = 3,
+                centered = false,
+                include_centered = true,
+            },
+            chapter_pagebreak = { include_centered = true },
+        },
+        koreader_settings = {
+            copt_font_size = 23,
+            copt_line_spacing = 148,
+            copt_h_page_margins = { 24, 24 },
+            copt_t_page_margin = 32,
+            copt_b_page_margin = 32,
+            copt_sync_t_b_page_margins = 1,
+        },
+        custom_header = {
+            enabled = true,
+            preset = "classic_folio",
+            left = "none",
+            center = "chapter_title",
+            right = "none",
+            divider_style = "none",
+            divider_position = "auto",
+            hide_on_chapter_start = false,
+        },
+        custom_footer = {
+            enabled = true,
+            preset = "classic_folio",
+            left = "none",
+            center = "book_title_page_progress_cn",
+            right = "none",
+            divider_style = "progress_bar",
+            divider_position = "below",
+            divider_thickness = 1,
+            hide_on_chapter_start = false,
+        },
+    },
+}
 
 return CSSTemplates

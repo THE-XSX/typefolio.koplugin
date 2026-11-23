@@ -218,20 +218,19 @@ local PARAM_RULES = {
         bold = "boolean",
         italic = "boolean",
         font_family = "font_family",
-        font_scale = { min = 70, max = 150 },
-        text_depth = { min = 40, max = 100 },
-        font_weight = { "default", "300", "normal", "600", "bold", "900" },
-        include_quotes = "boolean",
     },
     chapter_pagebreak = {
         include_centered = "boolean",
     },
     header_border = {
-        border = { "both", "bottom", "top", "none" },
+        border = { "both", "bottom", "top", "left", "none" },
         line_style = { "solid", "dashed", "dotted" },
         thickness = { min = 1, max = 5 },
         centered = "boolean",
         include_centered = "boolean",
+    },
+    paragraph_spacing = {
+        gap = { min = 0, max = 1.5, fractional = true },
     },
     blockquote_box = {
         bar = { min = 0, max = 10 },
@@ -408,9 +407,6 @@ local function validateConfig(value)
     end
     if value.skip_blockquotes ~= nil and type(value.skip_blockquotes) ~= "boolean" then
         return nil, "skip_blockquotes must be a boolean"
-    end
-    if value.disable_system_bars ~= nil and type(value.disable_system_bars) ~= "boolean" then
-        return nil, "disable_system_bars must be a boolean"
     end
     if value.folio_scene ~= nil and not Config.FOLIO_SCENE_SET[value.folio_scene] then
         return nil, "unsupported folio scene"
