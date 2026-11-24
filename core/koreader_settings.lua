@@ -432,6 +432,11 @@ function KOReaderSettings.syncNativeFooterBar(ui, custom_footer_enabled, setting
     local off = footer.mode_list.off or 0
     local key = KOReaderSettings.SAVED_NATIVE_FOOTER_MODE_KEY
 
+    -- If user explicitly disabled system status bar via TypeFolio, keep it disabled
+    if settings and settings:readSetting("typefolio_disable_native_status_bar") == true then
+        return
+    end
+
     if custom_footer_enabled == true then
         local is_active = ui.view.footer_visible == true
             or (type(footer.mode) == "number" and footer.mode ~= off)
@@ -462,6 +467,132 @@ function KOReaderSettings.syncNativeFooterBar(ui, custom_footer_enabled, setting
                     pcall(function() footer:refreshFooter(true, true) end)
                 end
             end
+        end
+    end
+end
+
+-- Checks whether KOReader's native bottom status bar is currently disabled and locked.
+function KOReaderSettings.isSystemStatusBarDisabled(ui)
+    local settings = rawget(_G, "G_reader_settings")
+    if settings and settings:readSetting("typefolio_disable_native_status_bar") == true then
+        return true
+    end
+    local f = ui and ui.view and ui.view.footer
+    local off = (f and f.mode_list and f.mode_list.off) or 0
+    local is_off = false
+    if f then
+        is_off = (f.mode == off) or (ui.view and ui.view.footer_visible == false)
+    elseif settings then
+        local mode = settings:readSetting("reader_footer_mode")
+        is_off = (mode == off)
+    end
+    local is_locked = false
+    if f and f.settings then
+        is_locked = (f.settings.lock_tap == true)
+    elseif settings then
+        local footer_cfg = settings:readSetting("footer")
+        is_locked = type(footer_cfg) == "table" and footer_cfg.lock_tap == true
+    end
+    return is_off and is_locked
+end
+
+-- Hides/shows KOReader's native status bar and toggles the system "Lock status bar" (lock_tap)
+-- to avoid accidental taps when disabled.
+function KOReaderSettings.setSystemStatusBarDisabled(ui, disabled, settings_override)
+    local f = ui and ui.view and ui.view.footer
+    local settings = settings_override or rawget(_G, "G_reader_settings")
+    local off = (f and f.mode_list and f.mode_list.off) or 0
+    local key = KOReaderSettings.SAVED_NATIVE_FOOTER_MODE_KEY
+
+    if disabled then
+        -- 1. Save active mode if not already off
+        local current_mode = f and f.mode
+        if type(current_mode) ~= "number" or current_mode == off then
+            current_mode = settings and settings:readSetting("reader_footer_mode")
+        end
+        if settings and type(current_mode) == "number" and current_mode ~= off then
+            pcall(function() settings:saveSetting(key, current_mode) end)
+        end
+
+        -- 2. Apply off mode
+        if f and f.applyFooterMode then
+            pcall(function() f:applyFooterMode(off) end)
+        end
+        if settings then
+            pcall(function() settings:saveSetting("reader_footer_mode", off) end)
+            pcall(function() settings:saveSetting("typefolio_disable_native_status_bar", true) end)
+        end
+        if ui and ui.doc_settings then
+            pcall(function() ui.doc_settings:saveSetting("reader_footer_mode", off) end)
+        end
+
+        -- 3. Lock status bar (systems's "设置->状态栏->锁定状态栏" = true)
+        if f and f.settings then
+            f.settings.lock_tap = true
+        end
+        if settings then
+            local footer_cfg = settings:readSetting("footer")
+            if type(footer_cfg) ~= "table" then
+                footer_cfg = (f and f.settings) or {}
+            end
+            footer_cfg.lock_tap = true
+            pcall(function() settings:saveSetting("footer", footer_cfg) end)
+        end
+        if ui and ui.doc_settings then
+            local doc_footer = ui.doc_settings:readSetting("footer")
+            if type(doc_footer) == "table" then
+                doc_footer.lock_tap = true
+                pcall(function() ui.doc_settings:saveSetting("footer", doc_footer) end)
+            end
+        end
+
+        if f and f.refreshFooter then
+            pcall(function() f:refreshFooter(true, true) end)
+        end
+    else
+        -- 1. Unlock status bar
+        if f and f.settings then
+            f.settings.lock_tap = false
+        end
+        if settings then
+            local footer_cfg = settings:readSetting("footer")
+            if type(footer_cfg) ~= "table" then
+                footer_cfg = (f and f.settings) or {}
+            end
+            footer_cfg.lock_tap = false
+            pcall(function() settings:saveSetting("footer", footer_cfg) end)
+            pcall(function() settings:saveSetting("typefolio_disable_native_status_bar", false) end)
+        end
+        if ui and ui.doc_settings then
+            local doc_footer = ui.doc_settings:readSetting("footer")
+            if type(doc_footer) == "table" then
+                doc_footer.lock_tap = false
+                pcall(function() ui.doc_settings:saveSetting("footer", doc_footer) end)
+            end
+        end
+
+        -- 2. Restore saved mode
+        local target = nil
+        if settings then
+            target = settings:readSetting(key)
+        end
+        if type(target) ~= "number" or target == off then
+            target = (f and f.mode_list and f.mode_list.page_progress) or 1
+        end
+
+        if f and f.applyFooterMode then
+            pcall(function() f:applyFooterMode(target) end)
+        end
+        if settings then
+            pcall(function() settings:saveSetting("reader_footer_mode", target) end)
+            pcall(function() settings:delSetting(key) end)
+        end
+        if ui and ui.doc_settings then
+            pcall(function() ui.doc_settings:saveSetting("reader_footer_mode", target) end)
+        end
+
+        if f and f.refreshFooter then
+            pcall(function() f:refreshFooter(true, true) end)
         end
     end
 end

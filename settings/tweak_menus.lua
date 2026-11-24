@@ -35,10 +35,10 @@ local TINT_LABELS = {
     none = "No background", light = "Light tint", medium = "Medium tint",
 }
 local TINT_LEVEL_LABELS = {
-    light = "Light", medium = "Medium", strong = "Strong",
+    light = "Light gray", medium = "Medium gray", strong = "Dark gray",
 }
 local FONT_COLOR_LABELS = {
-    default = "Default (follow body)",
+    default = "Default",
     black = "Pure black",
     dark = "Dark gray",
     medium = "Medium gray",
@@ -288,6 +288,51 @@ function TweakMenus.dialogueFontItems(ctx)
     return items
 end
 
+function TweakMenus.dialogueTintItems(ctx)
+    local tr = ctx.tr
+    local T = ctx.T
+    local O = CSSTemplates.tweak_options
+    local isTintOn = function()
+        return getParam(ctx, "dialogue_style", "tint") == true
+    end
+    local currentLevel = function()
+        return getParam(ctx, "dialogue_style", "tint_level") or "light"
+    end
+
+    local items = {
+        {
+            text_func = function()
+                local on = isTintOn()
+                return T(tr("%1: %2"), tr("Enable background tint"),
+                    on and tr("Enabled") or tr("Disabled"))
+            end,
+            keep_menu_open = true,
+            checked_func = isTintOn,
+            callback = function(touchmenu_instance)
+                setParam(ctx, "dialogue_style", "tint", not isTintOn())
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+            separator = true,
+        },
+    }
+
+    for _, level in ipairs(O.tint_level) do
+        table.insert(items, {
+            text = tr(TINT_LEVEL_LABELS[level] or level),
+            radio = true,
+            keep_menu_open = true,
+            enabled_func = isTintOn,
+            checked_func = function() return currentLevel() == level end,
+            callback = function(touchmenu_instance)
+                setParam(ctx, "dialogue_style", "tint_level", level)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
+            end,
+        })
+    end
+
+    return items
+end
+
 function TweakMenus.emphasisItems(ctx)
     local tr = ctx.tr
     local T = ctx.T
@@ -417,27 +462,30 @@ function TweakMenus.tweakSubItems(ctx, key)
         table.insert(items, {
             text_func = function()
                 local val = getParam(ctx, "dialogue_style", "font_color") or "default"
-                return T(tr("Font color depth: %1"), tr(FONT_COLOR_LABELS[val] or "Default (follow body)"))
+                return T(tr("Font color: %1"), tr(FONT_COLOR_LABELS[val] or "Default"))
             end,
             enabled_func = function() return readConfig(ctx).tweaks[key] == true end,
             sub_item_table = paramRadio(ctx, key, "font_color", O.font_color,
                 function(v) return tr(FONT_COLOR_LABELS[v]) end),
         })
-        table.insert(items, paramToggle(ctx, key, "tint", "Background tint"))
         table.insert(items, {
             text_func = function()
+                local on = getParam(ctx, "dialogue_style", "tint") == true
                 local val = getParam(ctx, "dialogue_style", "tint_level") or "light"
-                return T(tr("Tint intensity: %1"), tr(TINT_LEVEL_LABELS[val] or "Light"))
+                return T(tr("Font background tint: %1"),
+                    on and tr(TINT_LEVEL_LABELS[val] or "Light gray") or tr("Disabled"))
             end,
-            enabled_func = function()
-                return readConfig(ctx).tweaks[key] == true
-                    and getParam(ctx, "dialogue_style", "tint") == true
+            keep_menu_open = true,
+            enabled_func = function() return readConfig(ctx).tweaks[key] == true end,
+            checked_func = function() return getParam(ctx, "dialogue_style", "tint") == true end,
+            checkmark_callback = function(touchmenu_instance)
+                setParam(ctx, "dialogue_style", "tint", not getParam(ctx, "dialogue_style", "tint"))
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
-            sub_item_table = paramRadio(ctx, key, "tint_level", O.tint_level,
-                function(v) return tr(TINT_LEVEL_LABELS[v]) end),
+            sub_item_table_func = function() return TweakMenus.dialogueTintItems(ctx) end,
         })
-        table.insert(items, paramToggle(ctx, key, "bold", "Bold"))
-        table.insert(items, paramToggle(ctx, key, "italic", "Italic"))
+        table.insert(items, paramToggle(ctx, key, "bold", "Font bold"))
+        table.insert(items, paramToggle(ctx, key, "italic", "Font italic"))
         items[#items].separator = true
 
         if EpubDialogueTagger.isTaggedCopy(doc_file) then

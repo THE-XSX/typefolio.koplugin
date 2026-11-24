@@ -504,6 +504,11 @@ function TypeFolio:onReaderReady()
     end
     self._switching_to_copy = nil
 
+    local g_settings = rawget(_G, "G_reader_settings")
+    if g_settings and g_settings:readSetting("typefolio_disable_native_status_bar") == true then
+        KOReaderSettings.setSystemStatusBarDisabled(self.ui, true)
+    end
+
     self.book_context = BookContext.new{
         ui = self.ui,
         screen_size = function() return Screen:getWidth(), Screen:getHeight() end,

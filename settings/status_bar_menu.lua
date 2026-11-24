@@ -29,6 +29,7 @@ local UIManager = require("ui/uimanager")
 
 local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
 local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
+local KOReaderSettings = ModuleLoader.load(PLUGIN_ROOT, "core/koreader_settings.lua")
 
 local StatusBarMenu = {}
 
@@ -683,6 +684,29 @@ function StatusBarMenu.combinedItems(ctx)
             end,
             sub_item_table_func = function()
                 return StatusBarMenu.items(ctx, "custom_footer", { include_presets = false })
+            end,
+            separator = true,
+        },
+        {
+            text = tr("Disable system status bar"),
+            help_text = tr("Hide KOReader's native status bar and enable 'Lock status bar' in system settings to prevent accidental touches."),
+            keep_menu_open = true,
+            checked_func = function()
+                return KOReaderSettings.isSystemStatusBarDisabled(ctx.ui)
+            end,
+            callback = function(touchmenu_instance)
+                local currently_disabled = KOReaderSettings.isSystemStatusBarDisabled(ctx.ui)
+                local new_disabled = not currently_disabled
+                KOReaderSettings.setSystemStatusBarDisabled(ctx.ui, new_disabled)
+                pcall(function()
+                    local Notification = require("ui/widget/notification")
+                    UIManager:show(Notification:new{
+                        text = new_disabled
+                            and tr("System status bar disabled and locked")
+                            or tr("System status bar restored and unlocked"),
+                    })
+                end)
+                if touchmenu_instance then touchmenu_instance:updateItems() end
             end,
         },
     }

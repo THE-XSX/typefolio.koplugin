@@ -46,13 +46,13 @@
 | 功能分类 | 特效 / 参数名称 | 可调参数与选项 | 作用机制 |
 | --- | --- | --- | --- |
 | **正文与章节** | **段落间距** | 相对 `em` 间距（`0.00 ~ 1.50 em`，步进 `0.05`） | `p { margin-top: 0; margin-bottom: X em }`（随字号等比缩放，跨尺寸屏幕比例一致） |
-| | **对话样式** | **对话字体 & 字体颜色深浅 & 无损标注副本**：从设备字体中指定对话独立字体；可调对话字体颜色深浅（默认/纯黑/深灰/中灰/浅灰）；内置本地一键生成 `.tf_dlg.epub` 标注副本（原书不动，自动迁移配置与进度并支持打开原书时自动检测与自动打开副本），支持底色（深浅）、加粗、斜体 | `.tf-dlg` / `.dialogue` 等走 CSS，零翻页运行时开销 |
+| | **对话样式** | **对话字体 & 字体颜色 & 字体底色 & 字体加粗/斜体 & 无损副本**：从设备字体中指定对话独立字体；字体颜色（默认/纯黑/深灰/中灰/浅灰）；字体底色（底色开启、浅灰/中灰/深灰）；字体加粗；字体斜体；内置本地一键生成 `.tf_dlg.epub` 对话副本（原书不动，自动迁移配置与进度并支持打开原书时自动检测与自动打开副本） | `.tf-dlg` / `.dialogue` 等走 CSS，零翻页运行时开销 |
 | | **章节标题装饰** | 边框位置（上下 / 仅下 / 仅上 / **左侧竖条** / 无）、线样式、粗细 `1-5px`、是否居中 | `h1`~`h3`, `.title`, `.chapter-title`（CSS）；左侧竖条自动左对齐并留足上下留白 |
 | | **章节分页 & 起止线** | 章节前分页（支持居中段落回退）；章节开头/结尾标记独立开关，样式（单线 / 双线 / 五点）与 1–3 档粗细 | 分页走 CSS；起止线基于目录由 Painter 覆盖绘制，不改行高 |
 | | **信笺线与下划线** | 类型（无 / 逐行下划线 / 段落底线 / 强调词下划线）、笔触（实线 / 短虚线 / 密点 / 加粗实线）、线粗细（`1.0-2.0px` 及自定义 px）、跳过标题 / 跳过引用块 | 逐行下划线直接绘制，段落/强调词自动走 CSS |
 | | **引用块装饰** | 左竖线粗细（`0-8px`）、背景底色（无 / 浅 / 中）、是否斜体 | `blockquote`, `.quote`, `.citation`（CSS） |
 | | **首字放大下沉** | 放大倍数（`1.5-3.5em`）、是否加粗 | `h1+p::first-letter`, `p:first-of-type`（CSS） |
-| **状态栏** | **页眉与页脚** | 9 组局部状态栏预设（微信读书 / Kindle 原生 / KOBO 原生 / KOBO 双端 / 掌阅 / 汉王 / 文石 / 极简纯页码 / 现代全功能）；顶部/底部快捷勾选开关；左/中/右三插槽；分割线（无 / 实线 / 虚线 / 小圆点 / 微型进度条 / 自定义符号）；更多外观与选项（字号、加粗、边距偏移、章节起始页隐藏、原生状态栏联动） | `HeaderPainter` / `FooterPainter`（统一 `status_bar_helper.lua` 直接绘制于帧缓冲） |
+| **状态栏** | **页眉与页脚** | 9 组局部状态栏预设（微信读书 / Kindle 原生 / KOBO 原生 / KOBO 双端 / 掌阅 / 汉王 / 文石 / 极简纯页码 / 现代全功能）；顶部/底部快捷勾选开关；**禁用系统状态栏**（一键隐藏原生状态栏并开启系统「锁定状态栏」防误触）；左/中/右三插槽；分割线（无 / 实线 / 虚线 / 小圆点 / 微型进度条 / 自定义符号）；更多外观与选项（字号、加粗、边距偏移、章节起始页隐藏、原生状态栏联动） | `HeaderPainter` / `FooterPainter`（统一 `status_bar_helper.lua` 直接绘制于帧缓冲） |
 | **菜单行为** | **改动后预览页面** | 开 / 关（默认开），顶层菜单末行开关 | 修改后临时收起 `TouchMenu`，以透明 `TrapWidget` 接管任意点击/按键后原样恢复同一层子菜单 |
 
 边框位置选「无」时，只保留标题居中、不再占位留白，线样式与粗细一并灰置。特效未启用时其全部参数灰置。
@@ -83,6 +83,7 @@
 | `typefolio_default_new_book_preset` | G_reader_settings（全局） | 新书默认预设名称；首次打开未配置的新书时自动套用 |
 | `typefolio_preview_on_change` | G_reader_settings（全局） | 改动后是否临时收起菜单预览页面（默认开；仅关闭时写入 `false`） |
 | `typefolio_saved_native_footer_mode` | G_reader_settings（全局） | 开启自定义页脚时记忆的 KOReader 原生底部状态栏模式，关闭时对称恢复 |
+| `typefolio_disable_native_status_bar` | G_reader_settings（全局） | 禁用系统状态栏并开启系统的「锁定状态栏」防误触开关 |
 | `typefolio_language` | G_reader_settings（预留） | 语言覆盖（`en` / `zh_CN`），默认跟随系统 |
 
 ### 扩展开发规范
@@ -100,8 +101,8 @@ Type Folio adds platform-calibrated global typesetting presets (WeRead, Kindle N
 ### Streamlined Menu Map
 
 1. **Presets** — 3 built-in global platform presets (**WeRead Style**, **Kindle Native Style**, **Kobo Native Style**), custom presets (with "Default for new books ★" and versioned `.typefolio.json` import/export), plus **Restore default typesetting**.
-2. **Body & chapters** — **Paragraph spacing** (`0.00–1.50 em`), **Dialogue** (dedicated dialogue font + font color depth + background tint/level + bold/italic + non-destructive local `.tf_dlg.epub` copy with auto-detection and progress sync), **Chapter headings** (including **Left vertical bar** & flush-left bottom rule), chapter page breaks & start/end ornaments, **Ruled lines & underlines** (with inline Skip headings / Skip blockquotes), **Blockquote**, and **Drop caps**.
-3. **Status bar** — 9 independent status-bar layout presets (swap top/bottom bars without disturbing body typography), quick checkmark toggles for **Custom top header** & **Custom bottom footer**, 3-slot customization, clean dividers (None / Solid / Dashed / Small dots / Progress bar / Custom symbol), and native status-bar sync.
+2. **Body & chapters** — **Paragraph spacing** (`0.00–1.50 em`), **Dialogue** (dedicated dialogue font + font color + font background tint + font bold + font italic + non-destructive local `.tf_dlg.epub` copy with auto-detection and progress sync), **Chapter headings** (including **Left vertical bar** & flush-left bottom rule), chapter page breaks & start/end ornaments, **Ruled lines & underlines** (with inline Skip headings / Skip blockquotes), **Blockquote**, and **Drop caps**.
+3. **Status bar** — 9 independent status-bar layout presets (swap top/bottom bars without disturbing body typography), quick checkmark toggles for **Custom top header** & **Custom bottom footer**, **Disable system status bar** (hide native status bar and lock it to prevent accidental taps), 3-slot customization, clean dividers (None / Solid / Dashed / Small dots / Progress bar / Custom symbol), and native status-bar sync.
 4. **Help / user guide** — overview & rendering notes, gestures & presets guide.
 5. **Preview page after each change** — default on: steps the menu aside after every change so the page is visible, and any touch or key returns to the exact submenu, tab, and page.
 
@@ -153,13 +154,17 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
   - 打开原书时自动检测是否存在对应 `.tf_dlg.epub` 对话副本；若存在且开启自动跳转，则通过 `UIManager:nextTick` 无缝切换至副本，无需读者手动查找。
   - **双向阅读进度无缝同步**：打开或切换副本时，自动将原书的阅读进度、百分比、书签与 XPointer 位置同步至副本；在副本中关闭或返回时，同样自动将最新阅读进度回写至原书。
   - 新增「返回原书…」快捷操作，确认返回时自动暂停该书的自动跳转，读者亦可在原书菜单中随时开关「自动打开对话副本」。
-- **新增「对话字体颜色深浅」调节**：
-  - 在对话样式中提供 5 档文字浓淡选项：`默认（跟随正文）`、`纯黑 (#000000)`、`深灰 (#444444)`、`中灰 (#666666)`、`浅灰 (#888888)`，通过 CSS 注入实现零额外翻页开销，适应不同墨水屏对比度需求。
+- **新增「字体颜色」与「字体底色」精简配置**：
+  - **字体颜色**：提供 5 档选项：`默认`、`纯黑`、`深灰`、`中灰`、`浅灰`，通过 CSS 注入实现零额外翻页开销。
+  - **字体底色**：收纳为独立子菜单，内含「底色开启」开关与「浅灰 / 中灰 / 深灰」3 档灰度选择，同时支持主菜单直接勾选切换。
+  - **字体加粗 / 字体斜体**：纯粹直观的对话文字字效开关。
 - **对话菜单重整与全面「去技术化」**：
   - 彻底移除「按 class 标记着色」、「未标注原书」、「DOM 标记」等底层实现术语，全界面统一采用「对话样式」与「对话副本」等读者视角概念。
-  - 移除对话菜单中的动态匹配画笔入口，主菜单清晰分为两段：上半部分为纯粹的排版视觉效果（对话样式开关、对话字体、字体颜色深浅、背景底色、底色深浅、加粗、斜体）；下半部分为智能副本管理（当前在副本显示已激活并支持返回原书，在原书显示打开/自动打开与生成副本，底部常驻缓存清理）。
+  - 移除对话菜单中的动态匹配画笔入口，主菜单清晰分为两段：上半部分为纯粹的排版视觉效果（对话样式开关、对话字体、字体颜色、字体底色、字体加粗、字体斜体）；下半部分为智能副本管理（当前在副本显示已激活并支持返回原书，在原书显示打开/自动打开与生成副本，底部常驻缓存清理）。
 - **正文与章节菜单精简**：
   - 移除「正文与章节」中的着重号选项，进一步聚焦核心段落、章节、标题与对话排版。
+- **状态栏新增「禁用系统状态栏」防误触**：
+  - 在「状态栏」主菜单中一键隐藏原生系统状态栏，并同步打开系统的「设置 -> 状态栏 -> 锁定状态栏」，彻底杜绝触摸屏幕底部边缘时的误触唤醒；取消勾选时自动恢复原状态栏与解除锁定。
 
 ### 2026-11-22 (v3.2.0)
 
