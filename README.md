@@ -7,6 +7,31 @@
 「文笺」为 EPUB 等 CRE 排版书提供开箱即用的全局平台排版预设（微信读书 / Kindle 原生 / KOBO 原生）、对话换字体与高亮、章节与正文微调（段落间距、章节标题线条、信笺下划线、引用块、首字下沉）以及高度可定制的顶部页眉与底部页脚状态栏。
 与「阅笺 / Reading Folio」为同族插件。
 
+### 排版效果全景展示
+
+下图为使用「文笺」排版《撒哈拉的故事》第一章「结婚记」的真实阅读效果，集成了 **KOBO 原生风格**、**首字下沉**、**对话独立字体与斜体** 以及 **自研防误触状态栏** 等核心能力：
+
+<div align="center">
+  <a href="assets/typefolio_showcase.png">
+    <img src="assets/typefolio_showcase.png" alt="Type Folio 排版特性全景标注" style="max-width: 100%;">
+  </a>
+  <p><em>(点击图片可查看原始高清大图)</em></p>
+</div>
+
+| 序号 | 视觉元素 | 改造特性 | 对应设置与说明 |
+|:---:|:---|:---|:---|
+| **①** | **状态栏 (页眉与页脚)** | 顶部章节名 + 底部古典页码与进度条 | `状态栏`（Blitbuffer 独立引擎绘制，翻页零延迟；内置 9 组平台预设可一键切换） |
+| **②** | **章节标题** | 标题左侧竖条边框 | `正文与章节` → `章节` → 边框位置选「左侧竖条」，自动左对齐并留足上下出版留白 |
+| **③** | **开篇首字** | 章节首字下沉放大 (Drop Caps) | `正文与章节` → `首字下沉`（放大 3.0em，跨 2~3 行，经典纸书开篇版式） |
+| **④** | **段落空隙** | 弹性 `em` 段落间距 | `正文与章节` → `段落间距`（随字号等比例呼吸缩放，告别密不透风排版） |
+| **⑤** | **对话台词** | 对话专属字体 + 字体斜体 | `正文与章节` → `对话` → 专属无衬线斜体；**关键细节：叙述文字（“他问我。”）仍保留正文字体！** |
+| **⑥** | **全屏纯净** | 禁用系统状态栏（防误触锁定） | `状态栏` → `禁用系统状态栏`（隐藏原生底栏并开启系统「锁定状态栏」，彻底杜绝底部翻页误触） |
+
+> **💡 3 步一键复现此版式**：
+> 1. `排版预设` → 点击 **「KOBO 原生风格」**（一键套用边距、行距、竖条标题与页脚）
+> 2. `正文与章节` → 开启 **「首字下沉」** 与 **「对话样式」**（生成副本并选对话字体/斜体）
+> 3. `状态栏` → 勾选 **「禁用系统状态栏」**
+
 ### 精简主菜单结构
 
 顶层菜单收敛为 5 项，高频功能触手可及：
@@ -98,6 +123,23 @@
 
 Type Folio adds platform-calibrated global typesetting presets (WeRead, Kindle Native, Kobo Native), dialogue styling & font switching, paragraph/chapter styling, ruled underlines, and customizable top/bottom status bars for CRE books (EPUB etc.) in KOReader. Sibling plugin of Reading Folio.
 
+### Typesetting Showcase
+
+<div align="center">
+  <a href="assets/typefolio_showcase.png">
+    <img src="assets/typefolio_showcase.png" alt="Type Folio Feature Showcase" style="max-width: 100%;">
+  </a>
+  <p><em>(Click image for full-resolution view)</em></p>
+</div>
+
+The showcase above illustrates a typical combination of Type Folio's core capabilities:
+- **① Status Bar (Top Header & Bottom Footer)**: Centered chapter title, classical page numbers, and mini progress bar with chapter ticks rendered by Blitbuffer status-bar engine (9 built-in platform presets switchable with one click).
+- **② Chapter Title**: Classic publisher-style left vertical bar border with automatic left-alignment.
+- **③ Drop Caps**: Initial capital enlarged to 3.0em spanning 2–3 lines.
+- **④ Relative Paragraph Spacing**: Clean proportional `em` margins that scale gracefully across different font sizes.
+- **⑤ Dialogue Styling**: Dedicated font & italic styling for dialogue quotes (**while narration like "he asked me." keeps standard serif!**).
+- **⑥ Disable System Status Bar**: Hides KOReader native footer and activates "Lock tap" to prevent accidental triggers while turning pages.
+
 ### Streamlined Menu Map
 
 1. **Presets** — 3 built-in global platform presets (**WeRead Style**, **Kindle Native Style**, **Kobo Native Style**), custom presets (with "Default for new books ★" and versioned `.typefolio.json` import/export), plus **Restore default typesetting**.
@@ -120,6 +162,7 @@ Type Folio automatically selects the best backend behind the scenes: per-line un
 | `typefolio_default_new_book_preset` | global | Optional preset auto-applied when opening a previously unconfigured book |
 | `typefolio_preview_on_change` | global | Step the menu aside after each change (default on; only `false` is stored) |
 | `typefolio_saved_native_footer_mode` | global | Remembers native footer mode when toggling custom footer |
+| `typefolio_disable_native_status_bar` | global | Disables native status bar and locks it against accidental edge taps |
 | `typefolio_language` | global (optional) | `en` / `zh_CN` override |
 
 ### Known Limitation
