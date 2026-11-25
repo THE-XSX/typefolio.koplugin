@@ -27,6 +27,8 @@ local EpubDialogueTagger = {}
 EpubDialogueTagger.CACHE_DIR_NAME = "typefolio_cache"
 EpubDialogueTagger.SUFFIX = ".tf_dlg.epub"
 EpubDialogueTagger.CLASS_NAME = "tf-dlg"
+EpubDialogueTagger.TAG_MARKER_PATH = "META-INF/typefolio.tag"
+EpubDialogueTagger.BOOK_SUFFIX_LABEL = "文笺"
 
 local SKIP_TAGS = {
     head = true, script = true, style = true, title = true,
@@ -485,6 +487,403 @@ local function isRegularFileEntry(entry)
     return false
 end
 
+local function utf8Char(cp)
+    if type(cp) ~= "number" or cp <= 0 or cp > 0x10FFFF then return "" end
+    if cp <= 0x7F then
+        return string.char(cp)
+    elseif cp <= 0x7FF then
+        return string.char(
+            192 + math.floor(cp / 64),
+            128 + (cp % 64)
+        )
+    elseif cp <= 0xFFFF then
+        return string.char(
+            224 + math.floor(cp / 4096),
+            128 + (math.floor(cp / 64) % 64),
+            128 + (cp % 64)
+        )
+    else
+        return string.char(
+            240 + math.floor(cp / 262144),
+            128 + (math.floor(cp / 4096) % 64),
+            128 + (math.floor(cp / 64) % 64),
+            128 + (cp % 64)
+        )
+    end
+end
+
+local XML_NAMED_ENTITIES = {
+    amp = "&",
+    lt = "<",
+    gt = ">",
+    quot = '"',
+    apos = "'",
+    nbsp = " ",
+}
+
+local function decodeXmlText(str)
+    if type(str) ~= "string" or str == "" then return "" end
+    local text = str:gsub("<[^>]+>", "")
+    text = text:gsub("&(#?x?[%w]+);", function(entity)
+        local named = XML_NAMED_ENTITIES[entity:lower()]
+        if named then return named end
+        if entity:sub(1, 2):lower() == "#x" then
+            local cp = tonumber(entity:sub(3), 16)
+            return cp and utf8Char(cp) or ""
+        elseif entity:sub(1, 1) == "#" then
+            local cp = tonumber(entity:sub(2), 10)
+            return cp and utf8Char(cp) or ""
+        end
+        return "&" .. entity .. ";"
+    end)
+    return text:gsub("[%s\r\n\t]+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function utf8Truncate(str, max_bytes)
+    if type(str) ~= "string" then return "" end
+    if not max_bytes or #str <= max_bytes then return str end
+    local cut = max_bytes
+    -- Walk back while pointing at a UTF-8 continuation byte (10xxxxxx = 128..191).
+    while cut > 0 do
+        local b = str:byte(cut + 1)
+        if not b or b < 128 or b >= 192 then
+            break
+        end
+        cut = cut - 1
+    end
+    return str:sub(1, cut)
+end
+
+function EpubDialogueTagger.sanitizeFilenamePart(str, max_bytes)
+    if type(str) ~= "string" or str == "" then return "" end
+    local clean = str
+        :gsub("[%c<>:\"/\\|%?%*]", " ")
+        :gsub("%s+", " ")
+        :gsub("^[%.%s_-]+", "")
+        :gsub("[%.%s_-]+$", "")
+    if max_bytes and #clean > max_bytes then
+        clean = utf8Truncate(clean, max_bytes)
+        clean = clean:gsub("[%.%s_-]+$", "")
+    end
+    return clean
+end
+
+function EpubDialogueTagger.stripKnownSuffixes(stem)
+    if type(stem) ~= "string" then return "" end
+    local out = stem
+    out = out:gsub("%.[tT][fF]_[dD][lL][gG]$", "")
+    local label = EpubDialogueTagger.BOOK_SUFFIX_LABEL
+    if label ~= "" then
+        local esc = label:gsub("([%%%^%$%(%)%.%[%]%*%+%-%?])", "%%%1")
+        out = out:gsub("[-_%s]*" .. esc .. "$", "")
+    end
+    return out
+end
+
+function EpubDialogueTagger.parseOpfPathFromContainer(container_xml)
+    if type(container_xml) ~= "string" or container_xml == "" then return nil end
+    for attrs in container_xml:gmatch("<%s*rootfile%s+([^>]+)>") do
+        local p = attrs:match('full%-path%s*=%s*"([^"]+)"')
+            or attrs:match("full%-path%s*=%s*'([^']+)'")
+        if p and p ~= "" then
+            return p:gsub("^/+", "")
+        end
+    end
+    return nil
+end
+
+function EpubDialogueTagger.parseOpfMetadata(opf_xml)
+    if type(opf_xml) ~= "string" or opf_xml == "" then
+        return { title = nil, author = nil }
+    end
+    local meta_block = opf_xml:match("<[%w_%-]*:?metadata[^>]*>(.-)</[%w_%-]*:?metadata>") or opf_xml
+
+    local title = nil
+    for raw_title in meta_block:gmatch("<[dD][cC]:title[^>]*>(.-)</[dD][cC]:title>") do
+        local decoded = decodeXmlText(raw_title)
+        if decoded ~= "" then
+            title = decoded
+            break
+        end
+    end
+    if not title then
+        for raw_title in meta_block:gmatch("<title[^>]*>(.-)</title>") do
+            local decoded = decodeXmlText(raw_title)
+            if decoded ~= "" then
+                title = decoded
+                break
+            end
+        end
+    end
+
+    local authors, seen_authors = {}, {}
+    local function collectAuthors(pattern)
+        for raw_author in meta_block:gmatch(pattern) do
+            local decoded = decodeXmlText(raw_author)
+            if decoded ~= "" and not seen_authors[decoded] then
+                seen_authors[decoded] = true
+                table.insert(authors, decoded)
+                if #authors >= 3 then break end
+            end
+        end
+    end
+    collectAuthors("<[dD][cC]:creator[^>]*>(.-)</[dD][cC]:creator>")
+    if #authors == 0 then
+        collectAuthors("<creator[^>]*>(.-)</creator>")
+    end
+
+    return {
+        title = title,
+        author = #authors > 0 and table.concat(authors, ", ") or nil,
+    }
+end
+
+function EpubDialogueTagger.buildFormattedFilename(source_path, meta, opts)
+    opts = opts or {}
+    local append_tag = opts.append_tag ~= false
+    local tag_label = opts.tag_label or EpubDialogueTagger.BOOK_SUFFIX_LABEL
+    local ext = opts.ext or ".epub"
+
+    local filename = (source_path or "book.epub"):match("([^/\\]+)$") or "book.epub"
+    local raw_stem = filename:gsub("%.[eE][pP][uU][bB]$", "")
+    raw_stem = EpubDialogueTagger.stripKnownSuffixes(raw_stem)
+
+    local title = EpubDialogueTagger.sanitizeFilenamePart(meta and meta.title, 80)
+    local author = EpubDialogueTagger.sanitizeFilenamePart(meta and meta.author, 50)
+    if title == "" then
+        title = EpubDialogueTagger.sanitizeFilenamePart(raw_stem, 80)
+    end
+    if title == "" then
+        title = "book"
+    end
+
+    local parts = { title }
+    if author ~= "" then
+        table.insert(parts, author)
+    end
+    if append_tag then
+        local clean_tag = EpubDialogueTagger.sanitizeFilenamePart(tag_label, 24)
+        if clean_tag ~= "" then
+            table.insert(parts, clean_tag)
+        end
+    end
+
+    local base = table.concat(parts, "-")
+    if #base > 150 then
+        base = utf8Truncate(base, 150):gsub("[%.%s_-]+$", "")
+    end
+    if base == "" then base = "book" end
+    return base .. ext
+end
+
+local function pathExists(path, lfs_mod)
+    if type(path) ~= "string" or path == "" then return false end
+    local ok_lfs, lfs = true, lfs_mod
+    if not lfs then
+        ok_lfs, lfs = pcall(require, "libs/libkoreader-lfs")
+        if not ok_lfs then ok_lfs, lfs = pcall(require, "lfs") end
+    end
+    if ok_lfs and lfs and type(lfs.attributes) == "function" then
+        return lfs.attributes(path) ~= nil
+    end
+    local f = io.open(path, "rb")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+function EpubDialogueTagger.uniqueDestPath(dest_dir, filename, lfs_mod)
+    local dir = (dest_dir or "."):gsub("[/\\]+$", "")
+    local candidate = dir .. "/" .. filename
+    if not pathExists(candidate, lfs_mod) then
+        return candidate
+    end
+    local stem, ext = filename:match("^(.*)(%.[^%.]+)$")
+    if not stem then
+        stem, ext = filename, ""
+    end
+    for idx = 2, 999 do
+        local next_path = string.format("%s/%s (%d)%s", dir, stem, idx, ext)
+        if not pathExists(next_path, lfs_mod) then
+            return next_path
+        end
+    end
+    return candidate
+end
+
+local function htmlHasDialogueClass(html)
+    if type(html) ~= "string" or html == "" then return false end
+    local lowered = html:lower()
+    return lowered:find('class%s*=%s*["\'][^"\']*tf%-dlg') ~= nil
+end
+
+function EpubDialogueTagger.inspectEpub(epub_path, opts)
+    opts = opts or {}
+    local info = {
+        has_marker = false,
+        has_tf_dlg = false,
+        title = nil,
+        author = nil,
+        opf_path = nil,
+    }
+    if type(epub_path) ~= "string" or epub_path == "" then
+        info.error = "invalid path"
+        return info
+    end
+
+    local want_meta = opts.extract_metadata ~= false
+    local want_html_fallback = opts.scan_html_fallback == true
+
+    if opts.zip_io then
+        local entries, read_err = opts.zip_io.readAll(epub_path)
+        if not entries then
+            info.error = read_err or "failed to read epub"
+            return info
+        end
+        local by_path = {}
+        local fallback_opf = nil
+        for _, item in ipairs(entries) do
+            by_path[item.path] = item.data or ""
+            if item.path == EpubDialogueTagger.TAG_MARKER_PATH then
+                info.has_marker = true
+            elseif want_meta and not fallback_opf and item.path:lower():match("%.opf$") then
+                fallback_opf = item.path
+            end
+        end
+        if want_meta then
+            local opf_path = EpubDialogueTagger.parseOpfPathFromContainer(by_path["META-INF/container.xml"]) or fallback_opf
+            info.opf_path = opf_path
+            if opf_path and by_path[opf_path] then
+                local meta = EpubDialogueTagger.parseOpfMetadata(by_path[opf_path])
+                info.title = meta.title
+                info.author = meta.author
+            end
+        end
+        if want_html_fallback and not info.has_marker then
+            for _, item in ipairs(entries) do
+                if isHtmlEntry(item.path) and htmlHasDialogueClass(item.data) then
+                    info.has_tf_dlg = true
+                    break
+                end
+            end
+        end
+        return info
+    end
+
+    local ok_arch, Archiver = pcall(require, "ffi/archiver")
+    if not ok_arch or type(Archiver) ~= "table" or not Archiver.Reader then
+        info.error = "archiver_unavailable"
+        return info
+    end
+
+    local reader = Archiver.Reader:new()
+    if not reader:open(epub_path) then
+        info.error = "failed to open epub"
+        return info
+    end
+
+    local container_xml = nil
+    local fallback_opf_index = nil
+    local fallback_opf_path = nil
+    local opf_entries = {}
+    local html_indices = {}
+
+    local ok_scan, scan_err = pcall(function()
+        for entry in reader:iterate() do
+            if isRegularFileEntry(entry) then
+                local p = entry.path
+                if p == EpubDialogueTagger.TAG_MARKER_PATH then
+                    info.has_marker = true
+                elseif want_meta and p == "META-INF/container.xml" then
+                    container_xml = reader:extractToMemory(entry.index)
+                elseif want_meta and p:lower():match("%.opf$") then
+                    opf_entries[p] = entry.index
+                    if not fallback_opf_index then
+                        fallback_opf_index = entry.index
+                        fallback_opf_path = p
+                    end
+                elseif want_html_fallback and not info.has_marker and isHtmlEntry(p) then
+                    table.insert(html_indices, entry.index)
+                end
+            end
+        end
+
+        if want_meta then
+            local opf_path = EpubDialogueTagger.parseOpfPathFromContainer(container_xml) or fallback_opf_path
+            info.opf_path = opf_path
+            local opf_idx = (opf_path and opf_entries[opf_path]) or fallback_opf_index
+            if opf_idx then
+                local opf_xml = reader:extractToMemory(opf_idx)
+                local meta = EpubDialogueTagger.parseOpfMetadata(opf_xml)
+                info.title = meta.title
+                info.author = meta.author
+            end
+        end
+
+        if want_html_fallback and not info.has_marker and #html_indices > 0 then
+            for _, idx in ipairs(html_indices) do
+                local data = reader:extractToMemory(idx)
+                if htmlHasDialogueClass(data) then
+                    info.has_tf_dlg = true
+                    break
+                end
+            end
+        end
+    end)
+    pcall(reader.close, reader)
+    if not ok_scan then
+        info.error = tostring(scan_err)
+    end
+    return info
+end
+
+function EpubDialogueTagger.hasTagMarker(epub_path, opts)
+    local check_opts = {}
+    if type(opts) == "table" then
+        for k, v in pairs(opts) do check_opts[k] = v end
+    end
+    check_opts.extract_metadata = false
+    local info = EpubDialogueTagger.inspectEpub(epub_path, check_opts)
+    return info.has_marker == true
+end
+
+function EpubDialogueTagger.extractMetadata(epub_path, opts)
+    local meta_opts = {}
+    if type(opts) == "table" then
+        for k, v in pairs(opts) do meta_opts[k] = v end
+    end
+    meta_opts.extract_metadata = true
+    meta_opts.scan_html_fallback = false
+    local info = EpubDialogueTagger.inspectEpub(epub_path, meta_opts)
+    return { title = info.title, author = info.author, opf_path = info.opf_path, error = info.error }
+end
+
+function EpubDialogueTagger.isTaggedEpub(epub_path, opts)
+    opts = opts or {}
+    if opts.check_filename ~= false and EpubDialogueTagger.isTaggedCopy(epub_path) then
+        return true
+    end
+    local info = EpubDialogueTagger.inspectEpub(epub_path, {
+        extract_metadata = false,
+        scan_html_fallback = opts.scan_html_fallback == true,
+        zip_io = opts.zip_io,
+    })
+    return info.has_marker == true or info.has_tf_dlg == true
+end
+
+local function buildTagMarkerPayload(lang, stats)
+    return string.format(
+        '{"version":1,"class":"%s","lang":"%s","files_scanned":%d,"files_modified":%d,"quotes_tagged":%d}\n',
+        EpubDialogueTagger.CLASS_NAME,
+        tostring(lang or "all"),
+        tonumber(stats.files_scanned) or 0,
+        tonumber(stats.files_modified) or 0,
+        tonumber(stats.quotes_tagged) or 0
+    )
+end
+
 -- Archive backend using KOReader's built-in ffi/archiver (libarchive).
 -- Streams entries one by one instead of buffering the entire EPUB in RAM so large
 -- illustrated books (50–200 MB) never trigger OOM on low-RAM e-ink devices.
@@ -504,7 +903,7 @@ local function processWithArchiver(source_path, tmp_dest, lang, on_progress)
     local total = 0
     local mimetype_data = nil
     for entry in scan_reader:iterate() do
-        if isRegularFileEntry(entry) then
+        if isRegularFileEntry(entry) and entry.path ~= EpubDialogueTagger.TAG_MARKER_PATH then
             total = total + 1
             if entry.path == "mimetype" then
                 mimetype_data = scan_reader:extractToMemory(entry.index) or "application/epub+zip"
@@ -543,7 +942,9 @@ local function processWithArchiver(source_path, tmp_dest, lang, on_progress)
         end
 
         for entry in reader:iterate() do
-            if isRegularFileEntry(entry) and entry.path ~= "mimetype" then
+            if isRegularFileEntry(entry)
+                    and entry.path ~= "mimetype"
+                    and entry.path ~= EpubDialogueTagger.TAG_MARKER_PATH then
                 local data = reader:extractToMemory(entry.index) or ""
                 if isHtmlEntry(entry.path) then
                     stats.files_scanned = stats.files_scanned + 1
@@ -562,6 +963,11 @@ local function processWithArchiver(source_path, tmp_dest, lang, on_progress)
                 end
             end
         end
+
+        writer:addFileFromMemory(
+            EpubDialogueTagger.TAG_MARKER_PATH,
+            buildTagMarkerPayload(lang, stats)
+        )
     end)
     pcall(reader.close, reader)
     pcall(writer.close, writer)
@@ -587,25 +993,33 @@ local function processWithCustomIO(zip_io, source_path, tmp_dest, lang, on_progr
     local out_entries = {}
     local total = #entries
     for i, item in ipairs(entries) do
-        local data = item.data or ""
-        if isHtmlEntry(item.path) then
-            stats.files_scanned = stats.files_scanned + 1
-            local tagged, count = EpubDialogueTagger.tagXhtml(data, lang)
-            if count > 0 then
-                data = tagged
-                stats.files_modified = stats.files_modified + 1
-                stats.quotes_tagged = stats.quotes_tagged + count
+        if item.path ~= EpubDialogueTagger.TAG_MARKER_PATH then
+            local data = item.data or ""
+            if isHtmlEntry(item.path) then
+                stats.files_scanned = stats.files_scanned + 1
+                local tagged, count = EpubDialogueTagger.tagXhtml(data, lang)
+                if count > 0 then
+                    data = tagged
+                    stats.files_modified = stats.files_modified + 1
+                    stats.quotes_tagged = stats.quotes_tagged + count
+                end
             end
+            table.insert(out_entries, {
+                path = item.path,
+                data = data,
+                store = item.path == "mimetype",
+            })
         end
-        table.insert(out_entries, {
-            path = item.path,
-            data = data,
-            store = item.path == "mimetype",
-        })
         if type(on_progress) == "function" then
             on_progress(i, total)
         end
     end
+
+    table.insert(out_entries, {
+        path = EpubDialogueTagger.TAG_MARKER_PATH,
+        data = buildTagMarkerPayload(lang, stats),
+        store = false,
+    })
 
     local ok, write_err = zip_io.writeAll(tmp_dest, out_entries)
     if not ok then

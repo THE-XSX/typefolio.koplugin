@@ -18,6 +18,7 @@ local ModuleLoader = dofile(PLUGIN_ROOT .. "core/module_loader.lua")
 local CSSTemplates = ModuleLoader.load(PLUGIN_ROOT, "css/css_templates.lua")
 local Config = ModuleLoader.load(PLUGIN_ROOT, "core/config.lua")
 local EpubDialogueTagger = ModuleLoader.load(PLUGIN_ROOT, "tools/epub_dialogue_tagger.lua")
+local BatchCopySettings = ModuleLoader.load(PLUGIN_ROOT, "settings/batch_copy.lua")
 
 local ConfirmBox = require("ui/widget/confirmbox")
 local SpinWidget = require("ui/widget/spinwidget")
@@ -521,6 +522,21 @@ function TweakMenus.tweakSubItems(ctx, key)
                     end
                 end,
             })
+        elseif ctx.hasDialogueTagMarker and ctx.hasDialogueTagMarker() then
+            table.insert(items, {
+                text = tr("Dialogue copy active"),
+                enabled_func = function() return false end,
+            })
+            table.insert(items, {
+                text = tr("Export copy to folder…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return type(doc_file) == "string" and doc_file:lower():match("%.epub$") ~= nil
+                end,
+                callback = function()
+                    BatchCopySettings.exportCurrentBook(ctx)
+                end,
+            })
         elseif ctx.hasExistingDialogueCopy and ctx.hasExistingDialogueCopy() then
             table.insert(items, {
                 text = tr("Auto-open dialogue copy"),
@@ -568,7 +584,32 @@ function TweakMenus.tweakSubItems(ctx, key)
                     end
                 end,
             })
+            table.insert(items, {
+                text = tr("Export copy to folder…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return type(doc_file) == "string" and doc_file:lower():match("%.epub$") ~= nil
+                end,
+                callback = function()
+                    BatchCopySettings.exportCurrentBook(ctx)
+                end,
+            })
+            table.insert(items, {
+                text = tr("Overwrite this book (with backup)…"),
+                keep_menu_open = true,
+                enabled_func = function()
+                    return type(doc_file) == "string" and doc_file:lower():match("%.epub$") ~= nil
+                end,
+                callback = function()
+                    BatchCopySettings.overwriteCurrentBook(ctx)
+                end,
+            })
         end
+
+        table.insert(items, {
+            text = tr("Batch process folder…"),
+            sub_item_table_func = function() return BatchCopySettings.items(ctx) end,
+        })
 
         local cached_summary = nil
         local function getCacheSummary(force)

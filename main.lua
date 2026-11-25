@@ -33,6 +33,7 @@ local KOReaderSettings = ModuleLoader.load(PLUGIN_ROOT, "core/koreader_settings.
 local PresetCodec = ModuleLoader.load(PLUGIN_ROOT, "css/preset_codec.lua")
 local Settings = ModuleLoader.load(PLUGIN_ROOT, "settings/init.lua")
 local TweakMenus = ModuleLoader.load(PLUGIN_ROOT, "settings/tweak_menus.lua")
+local BatchCopySettings = ModuleLoader.load(PLUGIN_ROOT, "settings/batch_copy.lua")
 local I18n = ModuleLoader.load(PLUGIN_ROOT, "i18n/i18n.lua")
 local tr = I18n.new(PLUGIN_ROOT, { language_setting = "typefolio_language" })
 
@@ -62,6 +63,7 @@ local PRESET_FOLDER_NAME = "typefolio_presets"
 local PERF_ENABLED_KEY = "typefolio_performance_counters"
 local PERF_REPORT_FILENAME = "typefolio-performance.log"
 local PREVIEW_ON_CHANGE_KEY = "typefolio_preview_on_change"
+local BATCH_SETTINGS_KEY = "typefolio_batch_settings"
 
 local DIALOGUE_SYNC_KEYS = {
     "bookmark",
@@ -347,8 +349,12 @@ end
 
 local TypeFolio = WidgetContainer:extend{
     name = "typefolio",
-    is_doc_only = true,
+    is_doc_only = false,
 }
+
+function TypeFolio:_isFileManager()
+    return self.ui ~= nil and self.ui.file_chooser ~= nil and self.ui.document == nil
+end
 
 function TypeFolio:_getReadonlyConfig(ui)
     local target_ui = ui or self.ui
@@ -414,6 +420,10 @@ function TypeFolio:_initEngine()
 end
 
 function TypeFolio:init()
+    if self:_isFileManager() then
+        self.ui.menu:registerToMainMenu(self)
+        return
+    end
     self.perf_counter = PerfCounter.new{
         enabled = G_reader_settings:readSetting(PERF_ENABLED_KEY) == true,
         clock = function() return time.to_ms(time.monotonic()) end,
@@ -475,15 +485,71 @@ function TypeFolio:onShowTypeFolioMenu()
     return true
 end
 
+function TypeFolio:onShowBatchMenu()
+    local TouchMenu = require("ui/widget/touchmenu")
+    local ctx = self:_buildContext()
+    local items = BatchCopySettings.items(ctx)
+    table.insert(items, {
+        text_func = function()
+            local info = self:_getDialogueCacheSummary()
+            if info and info.count > 0 then
+                return T(tr("Clear dialogue copy cache (%1, %2 MB)…"),
+                    tostring(info.count), string.format("%.1f", info.total_bytes / (1024 * 1024)))
+            end
+            return tr("Clear dialogue copy cache…")
+        end,
+        keep_menu_open = true,
+        enabled_func = function()
+            local info = self:_getDialogueCacheSummary()
+            return info ~= nil and info.count > 0
+        end,
+        callback = function(touchmenu_instance)
+            local info = self:_getDialogueCacheSummary()
+            if not info or info.count == 0 then return end
+            local ConfirmBox = require("ui/widget/confirmbox")
+            UIManager:show(ConfirmBox:new{
+                text = T(tr("Delete %1 cached dialogue copy/copies (%2 MB)? Original books will not be affected."),
+                    tostring(info.count), string.format("%.1f", info.total_bytes / (1024 * 1024))),
+                ok_text = tr("Delete"),
+                ok_callback = function()
+                    self:_clearDialogueCache()
+                    if touchmenu_instance then touchmenu_instance:updateItems() end
+                end,
+                cancel_text = tr("Cancel"),
+            })
+        end,
+    })
+
+    items.icon = "appbar.typeset"
+    items.title = tr("Type Folio: Batch dialogue EPUBs")
+    items.remember = false
+
+    local container = CenterContainer:new{
+        covers_header = true,
+        ignore = "height",
+        dimen = Screen:getSize(),
+    }
+    container[1] = TouchMenu:new{
+        width = Screen:getWidth(),
+        show_parent = container,
+        tab_item_table = { items },
+    }
+    UIManager:show(container)
+    return true
+end
+
 function TypeFolio:onReaderReady()
-    if self.ui.paging then return end
+    if not (self.ui and self.ui.document) or self.ui.paging then return end
     if self.perf_counter then self.perf_counter:mark("event.reader_ready") end
     self._cached_config = nil
+    self._doc_has_tag_marker = nil
     self._last_header_enabled = nil
     self._last_footer_enabled = nil
 
     local doc_file = self.ui and self.ui.document and self.ui.document.file
-    if type(doc_file) == "string" and not EpubDialogueTagger.isTaggedCopy(doc_file) then
+    if type(doc_file) == "string"
+            and not EpubDialogueTagger.isTaggedCopy(doc_file)
+            and not EpubDialogueTagger.hasTagMarker(doc_file) then
         local cached_path = self:_getCachedDialogueCopyPath(doc_file)
         if cached_path and lfs.attributes(cached_path) then
             local auto_open = self.ui.doc_settings and self.ui.doc_settings:readSetting("typefolio_auto_open_copy")
@@ -612,8 +678,10 @@ local function syncDialogueProgress(src_settings, dest_settings, src_doc)
 end
 
 function TypeFolio:onCloseDocument()
+    if not (self.ui and self.ui.document) then return end
     if self.menu_preview then self.menu_preview:cancel() end
     self._cached_config = nil
+    self._doc_has_tag_marker = nil
     self._last_header_enabled = nil
     self._last_footer_enabled = nil
     self._switching_to_copy = nil
@@ -1066,6 +1134,42 @@ function TypeFolio:_buildContext()
         hasDialogueClassMarkup = function()
             return self.book_context and self.book_context:hasDialogueClassMarkup() or false
         end,
+        hasDialogueTagMarker = function()
+            if self._doc_has_tag_marker ~= nil then
+                return self._doc_has_tag_marker
+            end
+            local doc_file = self.ui and self.ui.document and self.ui.document.file
+            if type(doc_file) == "string" and doc_file:lower():match("%.epub$") then
+                self._doc_has_tag_marker = EpubDialogueTagger.hasTagMarker(doc_file)
+            else
+                self._doc_has_tag_marker = false
+            end
+            return self._doc_has_tag_marker
+        end,
+        getBatchSettings = function()
+            return G_reader_settings:readSetting(BATCH_SETTINGS_KEY)
+        end,
+        saveBatchSettings = function(val)
+            G_reader_settings:saveSetting(BATCH_SETTINGS_KEY, val)
+            G_reader_settings:flush()
+        end,
+        getDefaultBrowseDir = function()
+            if self.ui and self.ui.file_chooser and type(self.ui.file_chooser.path) == "string"
+                    and self.ui.file_chooser.path ~= "" then
+                return self.ui.file_chooser.path
+            end
+            local doc_file = self.ui and self.ui.document and self.ui.document.file
+            if type(doc_file) == "string" and doc_file ~= "" then
+                local dir = doc_file:gsub("\\", "/"):match("^(.*)/[^/]+$")
+                if dir and dir ~= "" then return dir end
+            end
+            return G_reader_settings:readSetting("lastdir") or "/"
+        end,
+        refreshFileManager = function()
+            if self.ui and self.ui.file_chooser and type(self.ui.file_chooser.refreshPath) == "function" then
+                self.ui.file_chooser:refreshPath()
+            end
+        end,
         isDialoguePainterSuppressedByCss = function()
             return self.last_apply and self.last_apply.plan
                 and self.last_apply.plan.dialogue_suppressed_by_css == true or false
@@ -1130,6 +1234,16 @@ function TypeFolio:menuItems()
 end
 
 function TypeFolio:addToMainMenu(menu_items)
+    if self:_isFileManager() then
+        menu_items.typefolio_batch = {
+            sorting_hint = "tools",
+            text = tr("Type Folio: Batch dialogue EPUBs"),
+            callback = function()
+                self:onShowBatchMenu()
+            end,
+        }
+        return
+    end
     menu_items.typefolio = {
         sorting_hint = "typeset",
         text = tr("Type Folio"),

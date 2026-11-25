@@ -109,6 +109,7 @@
 | `typefolio_preview_on_change` | G_reader_settings（全局） | 改动后是否临时收起菜单预览页面（默认开；仅关闭时写入 `false`） |
 | `typefolio_saved_native_footer_mode` | G_reader_settings（全局） | 开启自定义页脚时记忆的 KOReader 原生底部状态栏模式，关闭时对称恢复 |
 | `typefolio_disable_native_status_bar` | G_reader_settings（全局） | 禁用系统状态栏并开启系统的「锁定状态栏」防误触开关 |
+| `typefolio_batch_settings` | G_reader_settings（全局） | 批量处理目录、输出模式（导出 / 覆盖备份）与命名规则记忆配置 |
 | `typefolio_language` | G_reader_settings（预留） | 语言覆盖（`en` / `zh_CN`），默认跟随系统 |
 
 ### 扩展开发规范
@@ -163,6 +164,7 @@ Type Folio automatically selects the best backend behind the scenes: per-line un
 | `typefolio_preview_on_change` | global | Step the menu aside after each change (default on; only `false` is stored) |
 | `typefolio_saved_native_footer_mode` | global | Remembers native footer mode when toggling custom footer |
 | `typefolio_disable_native_status_bar` | global | Disables native status bar and locks it against accidental edge taps |
+| `typefolio_batch_settings` | global | Remembers batch processing directories, output mode, and naming preferences |
 | `typefolio_language` | global (optional) | `en` / `zh_CN` override |
 
 ### Known Limitation
@@ -190,6 +192,16 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 ---
 
 ## 更新记录 / Changelog
+
+### 2026-11-25 (v3.4.0)
+
+- **批量处理文件夹与两种输出模式（方案 1 + 3）**：
+  - **文件管理器与阅读器双入口**：取消 `is_doc_only` 限制，在 KOReader 文件管理器的工具菜单新增「文笺：批量处理对话图书」，同时在阅读器「正文与章节 → 对话」菜单中新增「导出规范命名副本到文件夹…」「覆盖当前书为对话版（自动备份）…」与「批量处理文件夹内的图书…」。
+  - **保存到指定目录 & 规范命名**：自动解析 EPUB 内部 `META-INF/container.xml` → `.opf` 的 `<dc:title>` 与 `<dc:creator>` 元数据，导出为 `书名-作者-文笺.epub` 或 `书名-作者.epub`（`-文笺` 后缀可自由开关），支持子目录递归扫描、保留目录层级与同步阅读进度。
+  - **原地覆盖 + 自动备份**：先生成临时文件校验成功后再原子替换原书，默认将原书备份至 `.typefolio_backup/`（可自定义备份目录或关闭备份）并保留原文件名，原有 `.sdr` 进度、划线笔记与合集记录完整保留（若选择改名覆盖则自动迁移 `.sdr`）。
+  - **异步分步队列**：通过 `UIManager:scheduleIn` 按本让出事件循环，实时显示进度并支持随时取消，处理完成后展示完整明细报告。
+- **包内指纹与免后缀识别**：
+  - 生成对话版 EPUB 时同步写入轻量级包内标记 `META-INF/typefolio.tag`；`core/book_context.lua` 与批处理扫描器同时支持识别 `.tf_dlg.epub`、`META-INF/typefolio.tag` 与 `<span class="tf-dlg">` 兜底探测，重命名或移出缓存目录后仍可零延迟识别并跳过重复加工。
 
 ### 2026-11-23 (v3.3.0)
 
